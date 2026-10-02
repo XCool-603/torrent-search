@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 单元测试（Node ${{ matrix.node }} / ${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['20', '22', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 本项目零运行时依赖，因此不需要 npm install
+      - name: 自检（语法 + 项目约定）
+        run: node tools/lint.mjs
+
+      - name: 单元测试
+        run: node --test --test-timeout=30000 test/
+
+  smoke:
+    name: 实网冒烟（非阻塞）
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 公开站点随时可能被墙/改版，这一项失败只作为提示，不阻塞合并
+      - name: 实网冒烟
+        run: node tools/smoke.mjs ubuntu

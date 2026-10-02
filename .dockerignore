@@ -1,0 +1,14 @@
+# 版本控制与本地产物不进镜像
+.git
+.github
+node_modules
+.cache
+downloads
+*.log
+*-out.txt
+test-output.txt
+http-out*.txt
+Dockerfile
+docker-compose.yml
+.dockerignore
+.gitignore

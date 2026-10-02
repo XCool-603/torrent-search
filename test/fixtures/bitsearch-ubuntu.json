@@ -1,0 +1,80 @@
+{
+  "success": true,
+  "query": "ubuntu",
+  "results": [
+    {
+      "id": "68131baea48761f7a5a37bd9",
+      "infohash": "611F70899D4E1D6A9C39CFC925F103DFEF630328",
+      "title": "ubuntu-24.04.2-desktop-amd64.iso",
+      "size": 6343219200,
+      "category": 1,
+      "subCategory": 7,
+      "seeders": 165,
+      "leechers": 311,
+      "downloads": 0,
+      "verified": false,
+      "updatedAt": "2026-10-01T12:46:00.043Z"
+    },
+    {
+      "id": "6442cc322e8ac2fc7fa34f36",
+      "infohash": "443C7602B4FDE83D1154D6D9DA48808418B181B6",
+      "title": "ubuntu-23.04-desktop-amd64.iso",
+      "size": 4932407296,
+      "category": 1,
+      "subCategory": 7,
+      "seeders": 163,
+      "leechers": 340,
+      "downloads": 0,
+      "verified": false,
+      "updatedAt": "2026-10-01T12:46:04.414Z"
+    },
+    {
+      "id": "6444b9786c6267b6ad43fb92",
+      "infohash": "D6B4535BA8F2B34012BC633569F113E77017E032",
+      "title": "ubuntu-23.04-live-server-amd64.iso",
+      "size": 2641264640,
+      "category": 1,
+      "subCategory": 7,
+      "seeders": 136,
+      "leechers": 237,
+      "downloads": 0,
+      "verified": false,
+      "updatedAt": "2026-10-01T12:45:56.972Z"
+    },
+    {
+      "id": "662b3bf97a868426ce9948b5",
+      "infohash": "2AA4F5A7E209E54B32803D43670971C4C8CAAA05",
+      "title": "ubuntu-24.04-desktop-amd64.iso",
+      "size": 6114656256,
+      "category": 1,
+      "subCategory": 7,
+      "seeders": 123,
+      "leechers": 310,
+      "downloads": 0,
+      "verified": false,
+      "updatedAt": "2026-10-01T12:46:04.538Z"
+    },
+    {
+      "id": "63f864e1ae697358dc80e874",
+      "infohash": "A7838B75C42B612DA3B6CC99BEED4ECB2D04CFF2",
+      "title": "ubuntu-22.04.2-desktop-amd64.iso",
+      "size": 4927586304,
+      "category": 1,
+      "subCategory": 7,
+      "seeders": 177,
+      "leechers": 331,
+      "downloads": 0,
+      "verified": false,
+      "updatedAt": "2026-10-01T12:45:55.560Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "perPage": 5,
+    "total": 4233,
+    "totalPages": 847,
+    "hasNext": true,
+    "hasPrev": false
+  },
+  "took": 1
+}

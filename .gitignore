@@ -1,0 +1,22 @@
+# 依赖（本项目零运行时依赖，此目录仅用于本地临时安装）
+node_modules/
+
+# 磁盘缓存（academic 全量索引等）
+.cache/
+
+# 下载目录（默认 ~/Downloads/torrent-search，若改到项目内则忽略）
+downloads/
+*.part
+
+# 测试与调试产物
+test-output.txt
+http-out*.txt
+*-out.txt
+*.tmp
+*.log
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

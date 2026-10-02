@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="本地磁力 / BT 聚合搜索界面，聚合多个公开数据源。">
+<title>种子搜索 · 磁力 / BT 聚合搜索</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<a class="skip-link" href="#results">跳到搜索结果</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <div class="brand">
+      <h1>种子搜索</h1>
+      <p class="subtitle">聚合多个公开磁力 / BT 源，一次搜索拿到更全的结果</p>
+    </div>
+    <div class="service-status" id="service-status" title="后端服务状态">
+      <span class="dot" id="service-dot" data-state="unknown" aria-hidden="true"></span>
+      <span id="service-text">正在检测后端服务…</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <form class="search-bar" id="search-form" role="search" novalidate>
+    <label class="sr-only" for="q">搜索关键词</label>
+    <input id="q" name="q" type="search" class="search-input"
+           placeholder="输入关键词，例如 ubuntu、进击的巨人、Blender"
+           autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+    <button type="submit" id="search-btn" class="btn primary" title="搜索（回车亦可）">搜索</button>
+  </form>
+
+  <section class="panel controls" aria-label="搜索选项">
+    <div class="field">
+      <label for="sort">排序</label>
+      <select id="sort">
+        <option value="relevance">相关度</option>
+        <option value="seeders">做种数</option>
+        <option value="leechers">下载数</option>
+        <option value="size">大小</option>
+        <option value="date">时间</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="page-size">每页条数</label>
+      <select id="page-size">
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </div>
+
+    <div class="field field-grow">
+      <div class="field-head">
+        <span id="sources-label" class="field-title">数据源</span>
+        <span id="source-count" class="muted small" aria-live="polite"></span>
+        <span class="spacer"></span>
+        <button type="button" id="select-all" class="btn tiny" title="勾选全部数据源">全选</button>
+        <button type="button" id="select-none" class="btn tiny" title="取消勾选全部数据源">全不选</button>
+      </div>
+      <div id="source-list" class="source-list" role="group" aria-labelledby="sources-label">
+        <p class="muted small">正在加载数据源…</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel filters" aria-label="过滤条件">
+    <div class="field">
+      <label for="min-seeders">最少做种数</label>
+      <input id="min-seeders" class="text-input num-input" type="number" min="0" step="1" inputmode="numeric"
+             placeholder="0" value="0" title="只保留做种数不低于该值的结果；留空视为 0">
+    </div>
+
+    <div class="field field-grow">
+      <label for="exclude">排除关键词</label>
+      <input id="exclude" class="text-input" type="text" placeholder="cam,枪版,TS"
+             autocomplete="off" spellcheck="false" title="标题中包含任一关键词的结果会被排除，多个关键词用逗号分隔">
+    </div>
+
+    <div class="field">
+      <span class="field-title" id="safe-label">安全过滤</span>
+      <label class="check-line" for="safe">
+        <input id="safe" type="checkbox" aria-describedby="safe-hint">
+        <span id="safe-hint">排除成人分类</span>
+      </label>
+    </div>
+
+    <div class="field filter-actions">
+      <span class="field-title">&nbsp;</span>
+      <div class="btn-row">
+        <button type="button" id="apply-filters" class="btn" title="应用过滤条件并重新搜索">应用过滤</button>
+        <button type="button" id="reset-filters" class="btn" title="恢复默认过滤条件">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="alert-slot" class="alert-slot" role="status" aria-live="polite"></div>
+
+  <section class="panel downloads-panel" id="downloads-panel" aria-label="下载任务">
+    <button type="button" id="downloads-toggle" class="downloads-toggle" aria-expanded="false" aria-controls="downloads-body" title="展开/收起下载任务面板">
+      <span class="downloads-title">下载任务</span>
+      <span id="downloads-badge" class="downloads-badge" hidden aria-hidden="true"></span>
+      <span class="spacer"></span>
+      <span id="downloads-caret" class="downloads-caret" aria-hidden="true">▸</span>
+    </button>
+    <div id="downloads-body" class="downloads-body" hidden>
+      <div class="downloads-toolbar">
+        <span id="downloads-dir" class="muted small"></span>
+        <span class="spacer"></span>
+        <button type="button" id="downloads-refresh" class="btn tiny" title="重新拉取任务列表">刷新</button>
+      </div>
+      <div id="downloads-alert" class="downloads-alert" role="status" aria-live="polite"></div>
+      <div id="downloads-list" class="downloads-list"></div>
+    </div>
+  </section>
+
+  <section class="panel source-status-panel" id="source-status-panel" hidden aria-label="数据源状态">
+    <div class="source-status-head">
+      <strong id="result-summary">共 0 条结果</strong>
+      <span id="filter-note" class="filter-note" hidden></span>
+      <span id="cache-note" class="cache-note" hidden title="本次结果来自服务端 60 秒缓存">缓存</span>
+      <span class="spacer"></span>
+      <button type="button" id="refresh-btn" class="btn tiny" title="跳过服务端 60 秒缓存，重新抓取当前关键词">重新抓取</button>
+      <span class="muted small">数据源状态</span>
+    </div>
+    <div id="source-status-list" class="source-status-list"></div>
+  </section>
+
+  <section id="results" class="results" aria-label="搜索结果">
+    <div id="empty-state" class="empty-state">
+      <p class="empty-title">输入关键词开始搜索</p>
+      <p class="muted">支持中英文关键词；可勾选数据源、调整排序、设置过滤条件。</p>
+      <p class="muted small">试试这些关键词：</p>
+      <div class="examples" id="examples"></div>
+    </div>
+
+    <div id="loading" class="loading" hidden aria-hidden="true">
+      <div class="skeleton-head">
+        <span class="skeleton-bar w-30"></span>
+        <span class="skeleton-bar w-15"></span>
+      </div>
+      <div id="skeleton-rows" class="skeleton-rows"></div>
+    </div>
+
+    <div id="no-results" class="empty-state" hidden>
+      <p class="empty-title">没有找到结果</p>
+      <p class="muted">可以尝试：减少勾选的数据源（部分源可能被限流或不可用）、换用更短或更通用的关键词、或检查拼写。</p>
+    </div>
+
+    <div class="table-wrap">
+      <table id="results-table" class="results-table" hidden>
+        <caption class="sr-only">搜索结果列表</caption>
+        <thead>
+          <tr>
+            <th scope="col" class="col-title" id="th-title" aria-sort="none">
+              <button type="button" class="th-sort" id="th-sort-title" title="按相关度排序">标题</button>
+            </th>
+            <th scope="col" class="col-size" id="th-size" aria-sort="none">
+              <button type="button" class="th-sort" id="th-sort-size" title="按大小排序">大小</button>
+            </th>
+            <th scope="col" class="col-seed" id="th-seeders" aria-sort="none">
+              <button type="button" class="th-sort" id="th-sort-seeders" title="按做种数排序">做种</button>
+            </th>
+            <th scope="col" class="col-leech" id="th-leechers" aria-sort="none">
+              <button type="button" class="th-sort" id="th-sort-leechers" title="按下载数排序">下载</button>
+            </th>
+            <th scope="col" class="col-src">来源</th>
+            <th scope="col" class="col-time" id="th-date" aria-sort="none">
+              <button type="button" class="th-sort" id="th-sort-date" title="按发布时间排序">时间</button>
+            </th>
+            <th scope="col" class="col-act">操作</th>
+          </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </div>
+
+    <nav id="pagination" class="pagination" hidden aria-label="分页">
+      <button type="button" id="prev-page" class="btn" title="上一页" aria-label="上一页">上一页</button>
+      <span id="page-info" class="page-info" aria-live="polite">第 1 / 1 页</span>
+      <button type="button" id="next-page" class="btn" title="下一页" aria-label="下一页">下一页</button>
+    </nav>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <span class="muted small">本地服务 · 无追踪 · 结果来自公开索引，请遵守当地法律法规。</span>
+  </div>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<noscript>
+  <p class="wrap">本页面需要启用 JavaScript 才能使用搜索功能。</p>
+</noscript>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

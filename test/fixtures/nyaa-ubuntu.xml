@@ -1,0 +1,26 @@
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:nyaa="https://nyaa.si/xmlns/nyaa" version="2.0">
+	<channel>
+		<title>Nyaa - &#34;ubuntu&#34; - Torrent File RSS</title>
+		<description>RSS Feed for &#34;ubuntu&#34;</description>
+		<link>https://nyaa.si/</link>
+		<atom:link href="https://nyaa.si/?page=rss" rel="self" type="application/rss+xml" />
+		<item>
+			<title>Koha Live CD Release 3 (3.0.4 Ubuntu 9.10 Desktop x86)</title>
+				<link>https://nyaa.si/download/96659.torrent</link>
+				<guid isPermaLink="true">https://nyaa.si/view/96659</guid>
+				<pubDate>Tue, 03 Nov 2009 07:03:00 -0000</pubDate>
+
+				<nyaa:seeders>0</nyaa:seeders>
+				<nyaa:leechers>0</nyaa:leechers>
+				<nyaa:downloads>0</nyaa:downloads>
+				<nyaa:infoHash>45008e48c8800b7d7643337b2e70a634e4c69f6a</nyaa:infoHash>
+			<nyaa:categoryId>6_1</nyaa:categoryId>
+			<nyaa:category>Software - Applications</nyaa:category>
+			<nyaa:size>624.0 MiB</nyaa:size>
+			<nyaa:comments>0</nyaa:comments>
+			<nyaa:trusted>No</nyaa:trusted>
+			<nyaa:remake>No</nyaa:remake>
+			<description><![CDATA[<a href="https://nyaa.si/view/96659">#96659 | Koha Live CD Release 3 (3.0.4 Ubuntu 9.10 Desktop x86)</a> | 624.0 MiB | Software - Applications | 45008e48c8800b7d7643337b2e70a634e4c69f6a]]></description>
+		</item>
+</channel>
+</rss>

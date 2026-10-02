@@ -1,0 +1,73 @@
+# 种子搜索 —— Docker Compose 部署
+#
+# 用法：
+#   docker compose up -d --build          # 构建并后台启动
+#   docker compose logs -f                # 看日志
+#   docker compose exec torrent-search node bin/magnet-search.mjs doctor   # 容器内诊断
+#   docker compose down                   # 停止
+#
+# 访问：http://127.0.0.1:8787/（或宿主机 IP:8787，局域网内其它设备也能打开）
+
+services:
+  torrent-search:
+    build: .
+    image: torrent-search:local
+    container_name: torrent-search
+
+    # 让 PID 1 正确处理 SIGTERM（docker stop 能优雅退出，等价于 tini）
+    init: true
+
+    ports:
+      - "${TORRENT_SEARCH_PORT:-8787}:8787"
+
+    environment:
+      TORRENT_SEARCH_HOST: 0.0.0.0
+      TORRENT_SEARCH_PORT: "8787"
+      # 下载目录固定到挂载点，文件落到宿主机
+      TORRENT_SEARCH_DOWNLOAD_DIR: /downloads
+      TORRENT_SEARCH_CACHE: /home/app/.cache/torrent-search
+      # 下载后端：auto（有 qBittorrent 就用它）/ builtin / qbittorrent
+      TORRENT_SEARCH_BACKEND: ${TORRENT_SEARCH_BACKEND:-auto}
+      # 宿主机上的 qBittorrent WebUI（容器里 127.0.0.1 指向容器自己，必须用 host.docker.internal）
+      TORRENT_SEARCH_QBITTORRENT: ${TORRENT_SEARCH_QBITTORRENT:-http://host.docker.internal:8080}
+
+      # 可选：让 HTTP(S) 请求走宿主机的代理（搜索源可用；**BT 的 P2P 流量是 TCP/UDP，代理帮不上**）
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal}
+
+    # Linux 宿主机上也能用 host.docker.internal 访问宿主服务（Docker Desktop 自带）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      # 下载文件落到 ./downloads（可改成 NAS 上的路径，例如 /volume1/downloads:/downloads）
+      - ./downloads:/downloads
+
+    restart: unless-stopped
+
+# ---------------------------------------------------------------------------
+# 想真正解决「P2P 被拦截」：让本服务的流量走一条干净的出口（VPN 容器）
+#
+# 这是容器化最值得用的场景——VPN 供应商通常不拦 P2P，而你的代理/机场会。
+# 做法是让 torrent-search 复用 VPN 容器的网络命名空间：
+#
+#   services:
+#     torrent-search:
+#       network_mode: "service:gluetun"     # ← 删掉上面的 ports，改用 gluetun 的端口
+#       depends_on: [gluetun]
+#
+#     gluetun:
+#       image: qmcgaw/gluetun
+#       cap_add: [NET_ADMIN]
+#       ports:
+#         - "8787:8787"                     # 端口在这里发布
+#       environment:
+#         - VPN_SERVICE_PROVIDER=your_provider
+#         - VPN_TYPE=wireguard
+#         - WIREGUARD_PRIVATE_KEY=...
+#         - SERVER_COUNTRIES=...
+#         - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12   # 允许容器网段直连（可选）
+#
+# 这样 BT 的 TCP/UDP 全部从 VPN 出口出去，不受宿主机 Clash TUN 影响。
+# ---------------------------------------------------------------------------

@@ -1,0 +1,36 @@
+{
+  "name": "torrent-search",
+  "version": "1.0.0",
+  "private": true,
+  "description": "零依赖的磁力/BT 聚合搜索：命令行 + 本地 Web UI + JSON API",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "bin": {
+    "magnet-search": "bin/magnet-search.mjs"
+  },
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./sources": "./src/sources/index.mjs"
+  },
+  "scripts": {
+    "search": "node bin/magnet-search.mjs",
+    "serve": "node bin/magnet-search.mjs serve",
+    "sources": "node bin/magnet-search.mjs sources",
+    "check": "node bin/magnet-search.mjs check",
+    "test": "node --test --test-timeout=30000 test/",
+    "lint": "node tools/lint.mjs",
+    "fixtures": "node tools/capture-fixtures.mjs",
+    "smoke": "node tools/smoke.mjs"
+  },
+  "keywords": [
+    "magnet",
+    "torrent",
+    "bt",
+    "search",
+    "dht"
+  ],
+  "license": "MIT"
+}
