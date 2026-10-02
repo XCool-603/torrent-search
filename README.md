@@ -442,6 +442,17 @@ sh scripts/docker.sh down     # 停止并移除容器（下载文件保留）
 docker compose exec torrent-search node bin/magnet-search.mjs doctor
 ```
 
+> **Linux / NAS 上的下载目录权限**：容器以固定 UID/GID `10001` 运行（非 root）。
+> 绑定挂载 `./downloads` 时，宿主目录必须能被这个 UID 写入，否则下载会报权限错误。两种解法：
+>
+> ```bash
+> sudo chown -R 10001:10001 ./downloads      # ① 把宿主目录交给容器用户
+> # ② 或者用宿主当前用户重建镜像，让两边 UID 一致：
+> docker compose build --build-arg UID=$(id -u) --build-arg GID=$(id -g)
+> ```
+>
+> Docker Desktop（Windows/macOS）的绑定挂载是宽松的，通常不需要处理。
+
 ### 容器化的三个实话
 
 **1. Docker 绕不过你的封锁。** Windows 上的 Docker Desktop 跑在 WSL2 虚拟机里，容器流量最终还是

@@ -425,6 +425,18 @@ Diagnostics inside the container:
 docker compose exec torrent-search node bin/magnet-search.mjs doctor
 ```
 
+> **Download directory permissions on Linux / NAS**: the container runs as a fixed UID/GID `10001`
+> (non-root). With the `./downloads` bind mount, the host directory must be writable by that UID or
+> downloads fail with a permission error. Two fixes:
+>
+> ```bash
+> sudo chown -R 10001:10001 ./downloads      # 1) give the host directory to the container user
+> # 2) or rebuild with your own UID/GID so both sides match:
+> docker compose build --build-arg UID=$(id -u) --build-arg GID=$(id -g)
+> ```
+>
+> Docker Desktop bind mounts (Windows/macOS) are permissive, so this usually needs no action.
+
 ### Three honest notes about containerising
 
 **1. Docker does not bypass the blocking.** On Windows, Docker Desktop runs containers inside a WSL2 VM,

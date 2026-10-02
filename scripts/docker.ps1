@@ -63,16 +63,19 @@ function Initialize-Compose {
   Stop-WithError 'docker compose 不可用。请安装 compose 插件，或升级 Docker。'
 }
 
-# 注意：参数名不能叫 $Args（PowerShell 的自动变量）；
-# 也不能写成 `& docker @($a + $b)`——那会把整个数组当成一个参数传过去，必须用 @变量 展开。
+# 注意：这个函数**故意不声明 param()**。
+#
+# 一旦声明了参数，PowerShell 会把传给 compose 的原生参数当成它自己的参数来解析：
+#   - `-d` 被当成 -Debug 而**静默丢弃**（`up -d --build` 变成 `up --build`，容器跑在前台！）
+#   - `-O`（wget 的输出参数）直接报"参数名不明确"
+# 用无 param 的 $args 透传，这些短横线参数才会原样交给 docker。
+# 另外 `& docker @($a + $b)` 会把整个数组当成一个参数，必须先用变量接住再 @ 展开。
 function Invoke-Compose {
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ComposeCmdArgs)
-
   if ($script:UseLegacyCompose) {
-    & docker-compose @ComposeCmdArgs
+    & docker-compose @args
   }
   else {
-    $fullArgs = $script:ComposeArgs + $ComposeCmdArgs
+    $fullArgs = $script:ComposeArgs + $args
     & docker @fullArgs
   }
 }
@@ -101,9 +104,11 @@ function Get-DownloadsDir {
 }
 
 function Wait-Healthy {
+  # 用容器自带的 wget（alpine 的 busybox 有）而不是 `node -e "<一段 JS>"`：
+  # 后者含有 > 与 || 这类字符，一旦调用链里经过 cmd.exe（例如用 .cmd 包装的 docker），
+  # 就会被当成重定向/命令分隔符而解析错乱。wget 只有普通参数，任何外壳都安全。
   for ($i = 0; $i -lt $HealthAttempts; $i++) {
-    $probe = "fetch('http://127.0.0.1:'+(process.env.TORRENT_SEARCH_PORT||8787)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-    Invoke-Compose exec -T $Service node -e $probe *> $null
+    Invoke-Compose exec -T $Service wget -q -O /dev/null 'http://127.0.0.1:8787/api/health' *> $null
     if ($LASTEXITCODE -eq 0) { return $true }
     Start-Sleep -Seconds $HealthInterval
   }

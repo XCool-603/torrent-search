@@ -12,3 +12,6 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 .gitignore
+# 本地配置（端口、下载目录、代理等）：不该进镜像，也会让层缓存无谓失效
+.env
+.env.local

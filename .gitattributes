@@ -17,5 +17,9 @@ Dockerfile text eol=lf
 .gitattributes text eol=lf
 LICENSE text eol=lf
 
+# shell 脚本必须是 LF：CRLF 会让 shebang 变成 `/bin/sh^M`，
+# 容器里报 `bad interpreter: No such file or directory`（Windows 宿主上的经典坑）
+*.sh text eol=lf
+
 # 测试夹具是抓取下来的真实响应，保持原样
 test/fixtures/* -text

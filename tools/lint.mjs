@@ -160,11 +160,83 @@ async function checkNoRuntimeDependencies() {
   checked.rules += 1;
 }
 
+/**
+ * 脚本文件的编码约定。
+ *
+ * 这两个要求是**相反的**，而且都踩过：
+ *   - .ps1 含中文时必须带 UTF-8 BOM：Windows PowerShell 5.1 没有 BOM 会按 ANSI(GBK) 解码，
+ *     中文被拆坏后连字符串引号都会被吃掉，直接变成语法错误；
+ *   - .sh 绝不能带 BOM：BOM 会跑到 shebang 前面，脚本无法执行。
+ *
+ * 编辑 .ps1 的工具（包括本仓库用的编辑器）常常会把 BOM 丢掉，所以必须由 lint 兜住。
+ */
+async function checkScriptEncodings() {
+  const expectations = [
+    { file: 'scripts/docker.ps1', bom: true, why: 'Windows PowerShell 5.1 需要 UTF-8 BOM 才能正确读中文' },
+    { file: 'scripts/docker.sh', bom: false, why: 'BOM 会破坏 shebang' },
+  ];
+
+  for (const { file, bom, why } of expectations) {
+    let buffer;
+    try {
+      buffer = await fs.readFile(path.join(ROOT, file));
+    } catch {
+      problems.push(`缺少部署脚本 ${file}`);
+      continue;
+    }
+
+    const hasBom = buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf;
+    if (bom && !hasBom) problems.push(`${file} 缺少 UTF-8 BOM：${why}`);
+    if (!bom && hasBom) problems.push(`${file} 不应带 UTF-8 BOM：${why}`);
+  }
+
+  checked.rules += 1;
+}
+
+/**
+ * compose 引用的环境变量必须在 .env.example 里有说明。
+ *
+ * 纯正则实现（不为一条检查引入 YAML 解析依赖），防的是文档腐烂：
+ * 加了新变量却忘了写进 .env.example，用户就不知道该调什么。
+ * 注释形式的 `# KEY=...` 也算已说明——可选项就是这么写的。
+ */
+async function checkComposeEnvDocs() {
+  let composeText;
+  let envText;
+  try {
+    composeText = await fs.readFile(path.join(ROOT, 'docker-compose.yml'), 'utf8');
+    envText = await fs.readFile(path.join(ROOT, '.env.example'), 'utf8');
+  } catch {
+    problems.push('缺少 docker-compose.yml 或 .env.example');
+    checked.rules += 1;
+    return;
+  }
+
+  const documented = new Set();
+  for (const line of envText.split(/\r?\n/)) {
+    const match = line.trim().match(/^#?\s*([A-Z0-9_]+)=/);
+    if (match) documented.add(match[1]);
+  }
+
+  const referenced = new Set();
+  for (const match of composeText.matchAll(/\$\{([A-Z0-9_]+)(?::-[^}]*)?\}/g)) referenced.add(match[1]);
+
+  for (const key of referenced) {
+    if (!documented.has(key)) {
+      problems.push(`docker-compose.yml 引用了 ${key}，但 .env.example 里没有说明`);
+    }
+  }
+
+  checked.rules += 1;
+}
+
 async function main() {
   await checkSyntax();
   await checkFrontendRules();
   await checkSourceContract();
   await checkNoRuntimeDependencies();
+  await checkScriptEncodings();
+  await checkComposeEnvDocs();
 
   process.stdout.write(`语法检查：${checked.syntax} 个文件\n`);
   process.stdout.write(`规则检查：${checked.rules} 项\n`);

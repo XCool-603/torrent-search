@@ -66,13 +66,14 @@ resolve_port() {
 }
 
 # 等容器内的健康检查通过（默认最多约 60 秒）
+#
+# 用容器自带的 wget（alpine 的 busybox 有）而不是 `node -e "<一段 JS>"`：
+# 后者含有 > 与 || 这类字符，一旦调用链里经过 cmd.exe（例如用 .cmd 包装的 docker），
+# 就会被当成重定向/命令分隔符而解析错乱。wget 只有普通参数，任何外壳都安全。
 wait_healthy() {
-  PORT=$(resolve_port)
   i=0
   while [ "$i" -lt "$HEALTH_ATTEMPTS" ]; do
-    if compose exec -T "$SERVICE" node -e \
-      "fetch('http://127.0.0.1:'+(process.env.TORRENT_SEARCH_PORT||8787)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
-      >/dev/null 2>&1; then
+    if compose exec -T "$SERVICE" wget -q -O /dev/null "http://127.0.0.1:8787/api/health" >/dev/null 2>&1; then
       return 0
     fi
     i=$((i + 1))

@@ -6,26 +6,38 @@
 
 FROM node:22-alpine
 
+# 固定 UID/GID：绑定挂载会盖掉镜像里的属主，非 root 进程可能因此写不进下载目录。
+# 需要和宿主对齐时重新构建：docker compose build --build-arg UID=$(id -u) --build-arg GID=$(id -g)
+ARG UID=10001
+ARG GID=10001
+
+# 先建用户——后面的 COPY --chown 需要它已存在。
+# -h 必须给：用户没有 HOME 时，很多工具写 ~/.cache 会失败，而且报错位置离根因很远。
+RUN addgroup -g "${GID}" app \
+ && adduser -u "${UID}" -G app -h /home/app -s /sbin/nologin -D app
+
 WORKDIR /app
 
-# 源码（零依赖：不需要 package-lock / npm ci）
-COPY package.json README.md ./
-COPY bin ./bin
-COPY src ./src
-COPY web ./web
-COPY test ./test
-COPY tools ./tools
-COPY docs ./docs
+# 源码（零依赖：不需要 package-lock / npm ci）。
+# 用 --chown 直接固化属主，避免再叠一层 chown -R（那会让镜像多一个数据层）。
+COPY --chown=app:app package.json README.md ./
+COPY --chown=app:app bin ./bin
+COPY --chown=app:app src ./src
+COPY --chown=app:app web ./web
+COPY --chown=app:app test ./test
+COPY --chown=app:app tools ./tools
+COPY --chown=app:app docs ./docs
 
-# 以非 root 用户运行；准备好下载目录与缓存目录
-RUN addgroup -S app && adduser -S app -G app \
- && mkdir -p /downloads /home/app/.cache \
- && chown -R app:app /app /downloads /home/app
+# 运行期要写的目录：镜像里新建的目录不受 COPY --chown 影响，必须显式建好并交给 app
+RUN install -d -o app -g app /downloads /home/app/.cache
+
+# USER 只出现一次，放在所有需要 root 的步骤之后
 USER app
 
 # 容器内必须绑 0.0.0.0，否则宿主机的端口映射进不来（代码里的容器检测也会给出同样的默认值，
 # 这里显式写出来是为了让 `docker inspect` 一眼能看清）
-ENV TORRENT_SEARCH_HOST=0.0.0.0 \
+ENV HOME=/home/app \
+    TORRENT_SEARCH_HOST=0.0.0.0 \
     TORRENT_SEARCH_PORT=8787 \
     TORRENT_SEARCH_DOWNLOAD_DIR=/downloads \
     TORRENT_SEARCH_CACHE=/home/app/.cache/torrent-search
