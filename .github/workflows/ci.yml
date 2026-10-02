@@ -27,8 +27,10 @@ jobs:
       - name: 自检（语法 + 项目约定）
         run: node tools/lint.mjs
 
+      # 不给路径：Node 的默认发现机制在 20/22/24 上都可用；
+      # 显式写 `test/` 在 Node 22/24 上会被当成文件路径而报 Cannot find module
       - name: 单元测试
-        run: node --test --test-timeout=30000 test/
+        run: node --test --test-timeout=30000
 
   smoke:
     name: 实网冒烟（非阻塞）

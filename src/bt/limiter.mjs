@@ -66,6 +66,9 @@ export class SpeedLimiter {
     this.waiters = [];
 
     this.timer = setInterval(() => this.refill(), 100);
+    // 空闲时不阻塞进程退出；一旦有人在等令牌，就 ref 住（见 acquire/dispatch）。
+    // 早期版本无条件 unref，导致"等待令牌"成为唯一待处理工作时进程直接退出——
+    // 在 Node 20 上被 CI 抓到（本地 Node 26 掩盖了这个问题）。
     this.timer.unref?.();
   }
 
@@ -100,6 +103,9 @@ export class SpeedLimiter {
       clearTimeout(waiter.timer);
       waiter.resolve();
     }
+
+    // 没有等待者就放开事件循环：否则一个已不再使用的限速器会一直拖住进程
+    if (this.waiters.length === 0) this.timer?.unref?.();
   }
 
   /**
@@ -125,6 +131,9 @@ export class SpeedLimiter {
     const remaining = want - this.tokens;
     this.tokens = 0;
 
+    // 有人开始等令牌 → 把补充定时器 ref 住，保证进程不会在等待期间退出
+    this.timer?.ref?.();
+
     return new Promise((resolve) => {
       const waiter = { need: remaining, resolve, timer: null };
       // 兜底：系统挂起导致 interval 停摆时不至于永远卡住
@@ -145,6 +154,7 @@ export class SpeedLimiter {
   /** 停止补充（下载结束/取消时调用，避免 interval 泄漏）。 */
   stop() {
     clearInterval(this.timer);
+    this.timer = null;
     for (const waiter of this.waiters) {
       clearTimeout(waiter.timer);
       waiter.resolve();

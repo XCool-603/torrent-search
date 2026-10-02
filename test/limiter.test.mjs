@@ -62,6 +62,21 @@ test('SpeedLimiter：stop() 后挂起的等待立即放行', async () => {
   assert.ok(true);
 });
 
+test('SpeedLimiter：等待令牌期间会 ref 住定时器（否则进程可能提前退出）', async () => {
+  const limiter = new SpeedLimiter({ bytesPerSecond: 50 * 1024 });
+
+  // 空闲时不应拖住进程
+  assert.equal(limiter.timer.hasRef(), false, '空闲时应 unref');
+
+  // 开始等令牌（一次要的量远超桶容量，必然进入等待）
+  const pending = limiter.acquire(200 * 1024);
+  assert.equal(limiter.timer.hasRef(), true, '等待期间必须 ref，否则事件循环空了进程会退出');
+
+  limiter.stop();
+  await pending; // stop() 会放行等待者
+  assert.equal(limiter.timer, null, 'stop() 后不应残留定时器');
+});
+
 test('SpeedLimiter：非法速率在构造时报错', () => {
   assert.throws(() => new SpeedLimiter({ bytesPerSecond: 0 }), /非法/);
   assert.throws(() => new SpeedLimiter({ bytesPerSecond: -100 }), /非法/);
