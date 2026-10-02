@@ -41,8 +41,9 @@ services:
       - "host.docker.internal:host-gateway"
 
     volumes:
-      # 下载文件落到 ./downloads（可改成 NAS 上的路径，例如 /volume1/downloads:/downloads）
-      - ./downloads:/downloads
+      # 下载文件落到宿主机（默认 ./downloads，可用 .env 里的 TORRENT_SEARCH_DOWNLOADS 改，
+      # 例如 NAS 上指向 /volume1/downloads）。任务记录 tasks.json 也在这里，升级时会保留。
+      - ${TORRENT_SEARCH_DOWNLOADS:-./downloads}:/downloads
 
     restart: unless-stopped
 

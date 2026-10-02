@@ -174,6 +174,30 @@ publish) before pasting.
 
 ---
 
+## Deployment scripts
+
+`scripts/docker.sh` (POSIX sh) and `scripts/docker.ps1` (Windows PowerShell) implement the documented
+one-command deploy/upgrade: `deploy`, `upgrade [--ref <tag>] [--no-cache]`, `status`, `logs`, `down`.
+Both must stay behaviourally identical — when you change one, change the other.
+
+Rules that came out of real breakage:
+
+- **`.ps1` files containing non-ASCII text must be saved as UTF-8 *with* a BOM.** Windows PowerShell 5.1
+  reads scripts as ANSI without a BOM, so Chinese messages get mangled and can even swallow string
+  terminators into syntax errors. `.sh` files are the opposite: **never** add a BOM, it breaks the shebang.
+- **Don't treat untracked files as local modifications** when deciding whether an upgrade is safe.
+  `deploy` creates `.env`, so a `git status --porcelain` check would block every upgrade. Use
+  `--untracked-files=no` and keep `.env` in `.gitignore`.
+- **Handle detached HEAD.** After `upgrade --ref v1.0.0` the checkout is detached, and a later plain
+  `upgrade` would fail on `git pull`; switch back to the default branch first.
+- **Record the current commit before rebuilding** so a failed health check can roll back.
+- In PowerShell, `$Args` is an automatic variable (don't use it as a parameter name), and `& docker @($a + $b)`
+  passes the whole array as *one* argument — build the array and splat it as `@var`.
+
+Both scripts are verified without Docker by putting a stub `docker` (and `docker.cmd`) first on `PATH`
+that logs its arguments and can simulate a failing health check; that covers deploy, upgrade,
+the dirty-tree refusal, the detached-HEAD path and the rollback.
+
 ## The bundled AI-agent skill
 
 `skills/torrent-search/` is a **DSH skill**: `SKILL.md` (frontmatter `name` + routing `description`) plus a

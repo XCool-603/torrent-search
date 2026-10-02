@@ -355,22 +355,92 @@ node bin/magnet-search.mjs "ubuntu" --proxy auto             # 自动探测（�
 
 ## Docker 部署
 
+### 一键部署
+
 ```bash
-docker compose up -d --build        # 构建并启动，访问 http://127.0.0.1:8787/
-docker compose exec torrent-search node bin/magnet-search.mjs doctor   # 容器内诊断
-docker compose down
+git clone https://github.com/XCool-603/torrent-search.git
+cd torrent-search
+sh scripts/docker.sh deploy
 ```
 
-下载文件落在 `./downloads`（compose 里挂的卷），环境变量可覆盖一切：
+脚本会检查 Docker、从 `.env.example` 生成 `.env`、构建镜像、启动容器，并**等到健康检查通过才报成功**
+（失败会直接把容器日志打出来）。完成后会告诉你访问地址与下载目录。
+
+不想用脚本，两条命令也一样：
+
+```bash
+cp .env.example .env          # 可选：改端口、下载目录、下载后端
+docker compose up -d --build
+```
+
+Windows PowerShell：
+
+```powershell
+git clone https://github.com/XCool-603/torrent-search.git
+cd torrent-search
+.\scripts\docker.ps1 deploy
+```
+
+### 一键升级
+
+```bash
+sh scripts/docker.sh upgrade              # 拉取最新 main → 重建镜像 → 重启 → 健康检查
+sh scripts/docker.sh upgrade --ref v1.1.0 # 升级/回退到指定版本（tag 或分支）
+sh scripts/docker.sh upgrade --no-cache   # 不用构建缓存
+```
+
+Windows：
+
+```powershell
+.\scripts\docker.ps1 upgrade
+.\scripts\docker.ps1 upgrade --ref v1.1.0
+```
+
+升级脚本做了这些事，所以可以放心按：
+
+- **先记录当前提交**，重建后健康检查不过就**自动回滚**到升级前的版本；
+- 检测到**已跟踪文件的本地改动就中止**（不会覆盖你的修改）；`.env`、`downloads/` 这类未跟踪文件不影响升级；
+- 上次用 `--ref` 升级过（处于 detached HEAD）也能直接再升级，会自动切回默认分支；
+- **下载文件与任务记录都在 `./downloads` 卷里，升级、重建、删容器都不会动它们**；
+  重启后未完成的下载会自动续传（`serve` 默认开启自动续传）。
+
+其它常用命令：
+
+```bash
+sh scripts/docker.sh status   # 容器状态 + 健康检查
+sh scripts/docker.sh logs     # 跟随日志
+sh scripts/docker.sh down     # 停止并移除容器（下载文件保留）
+```
+
+> 慢机器上健康检查可能等不够（默认等 30 次 × 2 秒）：
+> `TORRENT_SEARCH_HEALTH_ATTEMPTS=60 sh scripts/docker.sh deploy`
+
+### 配置
+
+所有可调项都在 `.env`（由 `.env.example` 生成）：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `TORRENT_SEARCH_PORT` | `8787` | 宿主机对外端口 |
+| `TORRENT_SEARCH_DOWNLOADS` | `./downloads` | 宿主机存放下载文件的目录（NAS 上可指向 `/volume1/downloads`） |
+| `TORRENT_SEARCH_BACKEND` | `auto` | `auto` / `builtin` / `qbittorrent` |
+| `TORRENT_SEARCH_QBITTORRENT` | `http://host.docker.internal:8080` | 宿主机上的 qBittorrent WebUI |
+| `HTTPS_PROXY` / `HTTP_PROXY` | 空 | 让搜索请求走宿主机代理（BT 的 P2P 是 TCP/UDP，代理帮不上） |
+
+容器内部还有一组变量（镜像里已设好，一般不用改）：
 
 | 环境变量 | 默认（本机 / 容器） | 说明 |
 | --- | --- | --- |
 | `TORRENT_SEARCH_HOST` | `127.0.0.1` / `0.0.0.0` | 监听地址。容器里必须 `0.0.0.0`，否则端口映射进不来 |
 | `TORRENT_SEARCH_PORT` | `8787` | 监听端口 |
 | `TORRENT_SEARCH_DOWNLOAD_DIR` | `~/Downloads/torrent-search` / `/downloads` | 下载目录 |
-| `TORRENT_SEARCH_BACKEND` | `auto` | `auto` / `builtin` / `qbittorrent` |
-| `TORRENT_SEARCH_QBITTORRENT` | `127.0.0.1:8080` / `host.docker.internal:8080` | qBittorrent WebUI 地址 |
 | `TORRENT_SEARCH_CACHE` | 用户缓存目录 | 磁盘缓存（academic 全量索引） |
+
+容器内诊断：
+
+```bash
+docker compose exec torrent-search node bin/magnet-search.mjs doctor
+```
 
 ### 容器化的三个实话
 

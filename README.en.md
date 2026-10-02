@@ -335,22 +335,95 @@ so it cannot be switched at runtime).
 
 ## Docker deployment
 
+### One-command deploy
+
 ```bash
-docker compose up -d --build        # build and start; http://127.0.0.1:8787/
-docker compose exec torrent-search node bin/magnet-search.mjs doctor
-docker compose down
+git clone https://github.com/XCool-603/torrent-search.git
+cd torrent-search
+sh scripts/docker.sh deploy
 ```
 
-Downloads land in `./downloads` (the mounted volume). Everything is configurable by environment variable:
+The script checks Docker, creates `.env` from `.env.example`, builds the image, starts the container,
+and **only reports success once the health check passes** (on failure it prints the container logs).
+It ends by telling you the URL and the download directory.
+
+Without the script, two commands do the same:
+
+```bash
+cp .env.example .env          # optional: port, download directory, download backend
+docker compose up -d --build
+```
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/XCool-603/torrent-search.git
+cd torrent-search
+.\scripts\docker.ps1 deploy
+```
+
+### One-command upgrade
+
+```bash
+sh scripts/docker.sh upgrade              # pull latest main → rebuild → restart → health check
+sh scripts/docker.sh upgrade --ref v1.1.0 # move to a specific tag or branch (also works for rollback)
+sh scripts/docker.sh upgrade --no-cache   # skip the build cache
+```
+
+Windows:
+
+```powershell
+.\scripts\docker.ps1 upgrade
+.\scripts\docker.ps1 upgrade --ref v1.1.0
+```
+
+The upgrade script is safe to run because it:
+
+- **records the current commit first** and **automatically rolls back** if the rebuilt container fails
+  its health check;
+- **aborts when tracked files have local modifications** (it will not overwrite your edits); untracked
+  files such as `.env` and `downloads/` do not block an upgrade;
+- handles a previous `--ref` upgrade (detached HEAD) by switching back to the default branch first;
+- keeps **downloads and the task list inside the `./downloads` volume** — upgrading, rebuilding or
+  removing the container never touches them, and unfinished downloads resume automatically on restart.
+
+Other commands:
+
+```bash
+sh scripts/docker.sh status   # container status + health check
+sh scripts/docker.sh logs     # follow logs
+sh scripts/docker.sh down     # stop and remove the container (downloads are kept)
+```
+
+> On a slow machine the health check may need longer than the default 30 × 2 s:
+> `TORRENT_SEARCH_HEALTH_ATTEMPTS=60 sh scripts/docker.sh deploy`
+
+### Configuration
+
+Everything tunable lives in `.env` (created from `.env.example`):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `TORRENT_SEARCH_PORT` | `8787` | Host port |
+| `TORRENT_SEARCH_DOWNLOADS` | `./downloads` | Host directory for downloads (e.g. `/volume1/downloads` on a NAS) |
+| `TORRENT_SEARCH_BACKEND` | `auto` | `auto` / `builtin` / `qbittorrent` |
+| `TORRENT_SEARCH_QBITTORRENT` | `http://host.docker.internal:8080` | qBittorrent WebUI on the host |
+| `HTTPS_PROXY` / `HTTP_PROXY` | empty | Route search requests through a host proxy (P2P is TCP/UDP; a proxy does not help it) |
+
+Inside the container (already set by the image):
 
 | Variable | Default (native / container) | Meaning |
 | --- | --- | --- |
 | `TORRENT_SEARCH_HOST` | `127.0.0.1` / `0.0.0.0` | Bind address. In a container it must be `0.0.0.0` or port mapping cannot reach it |
 | `TORRENT_SEARCH_PORT` | `8787` | Listen port |
 | `TORRENT_SEARCH_DOWNLOAD_DIR` | `~/Downloads/torrent-search` / `/downloads` | Download directory |
-| `TORRENT_SEARCH_BACKEND` | `auto` | `auto` / `builtin` / `qbittorrent` |
-| `TORRENT_SEARCH_QBITTORRENT` | `127.0.0.1:8080` / `host.docker.internal:8080` | qBittorrent WebUI endpoint |
 | `TORRENT_SEARCH_CACHE` | user cache dir | Disk cache (the academic catalogue) |
+
+Diagnostics inside the container:
+
+```bash
+docker compose exec torrent-search node bin/magnet-search.mjs doctor
+```
 
 ### Three honest notes about containerising
 

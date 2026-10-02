@@ -4,6 +4,9 @@ node_modules/
 # 磁盘缓存（academic 全量索引等）
 .cache/
 
+# Docker 部署的本地配置（由 .env.example 生成，含端口/路径等本机设置）
+.env
+
 # 下载目录（默认 ~/Downloads/torrent-search，若改到项目内则忽略）
 downloads/
 *.part
