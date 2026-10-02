@@ -288,6 +288,10 @@ async function runServe(positionals, options, color) {
     limitSpeed: parseSpeedLimit(options.limitSpeed) ?? 0,
     backend: resolveBackendChoice(options, color),
     qbit: resolveQbitConfig(options),
+    // 这两个开关以前只对 download 命令生效，serve 下被静默忽略
+    // （表现为：即使加了 --no-extra-trackers，仍会去等公共 tracker 超时）
+    useDefaultTrackers: options.noExtraTrackers !== true,
+    useDht: options.noDht !== true,
     persistFile: path.join(options.dir ?? defaultDownloadDir(), 'tasks.json'),
     logger: ctx.logger,
   });

@@ -34,8 +34,10 @@ test('DiskCache：mtime 略微超前时 ageMs 钳为 0（Windows 时间戳取整
   await withTempCache(async (cache) => {
     await cache.set('future', 'data');
 
-    // 模拟 NTFS 时间戳取整：让 mtime 比当前时间晚几毫秒
-    const future = new Date(Date.now() + 5);
+    // 模拟 NTFS 时间戳取整：让 mtime 落在未来。
+    // 用 60 秒而不是几毫秒——否则事件循环稍有延迟，"未来"就过期了，测试会偶发失败
+    // （实测连跑 4 轮挂 1 次）。
+    const future = new Date(Date.now() + 60_000);
     await fs.utimes(cache.filePath('future'), future, future);
 
     const hit = await cache.get('future');
