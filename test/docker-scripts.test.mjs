@@ -138,7 +138,9 @@ exit 0
 async function runScript(params) {
   const env = {
     ...process.env,
-    PATH: `${params.binDir}${path.delimiter}${process.env.PATH}`,
+    // isolated：PATH 里**只**放给定的目录。用于验证"没有 docker"的分支——
+    // 只把空目录前置是不够的，CI 的 runner 自带 docker，脚本会真的去部署一次。
+    PATH: params.isolated ? params.binDir : `${params.binDir}${path.delimiter}${process.env.PATH}`,
     STUB_LOG: params.logFile,
     STUB_HEALTH: params.health,
     // 让健康检查快速结束，测试不必等 60 秒
@@ -379,20 +381,34 @@ test('docker.sh：没有 docker 时给出安装指引而不是崩溃', { skip: I
   await withWorkspace(async (ctx) => {
     if (!ctx.shell) return;
 
-    // 用一个不含桩 docker 的 PATH
-    const emptyBin = path.join(ctx.workspace, 'empty-bin');
-    await fs.mkdir(emptyBin, { recursive: true });
+    // 真正把 docker 藏起来：PATH 里只留一个目录，里面只放脚本在检查 docker 之前
+    // 用到的那一个外部命令（dirname；command/printf/cd/pwd 都是 shell 内建）。
+    // 只前置空目录是不够的——CI 的 ubuntu runner 自带 docker，脚本会真的部署一次。
+    const minimalBin = path.join(ctx.workspace, 'minimal-bin');
+    await fs.mkdir(minimalBin, { recursive: true });
+    let linked = false;
+    for (const dir of ['/usr/bin', '/bin', '/usr/local/bin']) {
+      try {
+        await fs.symlink(path.join(dir, 'dirname'), path.join(minimalBin, 'dirname'));
+        linked = true;
+        break;
+      } catch {
+        /* 换下一个 */
+      }
+    }
+    if (!linked) return; // 找不到 dirname 就跳过，不制造假失败
 
     const result = await runScript({
-      binDir: emptyBin,
+      binDir: minimalBin,
       dir: ctx.deployDir,
       shell: ctx.shell,
       health: 'ok',
       logFile: ctx.logFile,
       command: ['deploy'],
+      isolated: true,
     });
 
-    assert.equal(result.code, 1);
+    assert.equal(result.code, 1, result.output);
     assert.match(result.output, /找不到 docker 命令/);
   });
 });

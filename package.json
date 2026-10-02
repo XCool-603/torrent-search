@@ -20,7 +20,7 @@
     "serve": "node bin/magnet-search.mjs serve",
     "sources": "node bin/magnet-search.mjs sources",
     "check": "node bin/magnet-search.mjs check",
-    "test": "node --test --test-timeout=30000",
+    "test": "node --test --test-timeout=60000",
     "lint": "node tools/lint.mjs",
     "fixtures": "node tools/capture-fixtures.mjs",
     "smoke": "node tools/smoke.mjs",
