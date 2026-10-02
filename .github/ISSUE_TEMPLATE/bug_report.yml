@@ -1,0 +1,100 @@
+name: Bug report / 问题反馈
+description: 搜索源、解析、下载、界面等任何环节出错都可以在这里报
+title: '[Bug] '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请尽量填完整——尤其是 **doctor 输出**，它能区分"源挂了"和"你的网络拦了 P2P"，
+        是下载类问题里最有价值的信息。
+
+        提交前请先搜索已有 issue，避免重复。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么
+      description: 你执行了什么、期望什么、实际得到什么
+      placeholder: |
+        执行：node bin/magnet-search.mjs "ubuntu 24.04" --sources apibay
+        期望：返回结果
+        实际：报错 xxx
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: doctor 输出（下载相关的问题必填）
+      description: 运行 `node bin/magnet-search.mjs doctor`，把完整输出粘贴到这里
+      render: text
+      placeholder: |
+        P2P 下载环境诊断
+          ⚠ 代理 TUN 虚拟网卡  ...
+          ✓ tracker 通告       ...
+    validations:
+      required: false
+
+  - type: input
+    id: command
+    attributes:
+      label: 完整命令 / 请求
+      description: 涉及 Web UI 或 API 时，请给出页面操作步骤或完整 URL
+      placeholder: node bin/magnet-search.mjs "关键词" --sort seeders
+    validations:
+      required: false
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node 版本
+      description: 运行 `node --version`（本项目要求 ≥ 20）
+      placeholder: v20.19.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Docker 容器
+    validations:
+      required: true
+
+  - type: dropdown
+    id: network
+    attributes:
+      label: 网络环境
+      description: 代理/TUN 会直接影响能否连上源与 peer
+      options:
+        - 直连（无代理）
+        - 系统代理（HTTP/SOCKS）
+        - 代理 TUN 模式（如 Clash TUN）
+        - VPN
+        - 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: raw
+    attributes:
+      label: 原始响应（解析类问题）
+      description: 如果是某个源的解析出错，请附上该源的原始响应（可用 `npm run check` 或 curl 获取）
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已经搜索过现有 issue
+          required: true
+        - label: 粘贴的内容里没有个人隐私（IP、代理密码、不想公开的磁力链接等）
+          required: true

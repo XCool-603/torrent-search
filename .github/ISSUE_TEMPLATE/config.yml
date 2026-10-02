@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 下载失败 / 连不上 peer
+    url: https://github.com/XCool-603/torrent-search#下载失败先跑-doctor
+    about: 先运行 doctor 命令——大多数"下载不动"是网络层拦截 P2P，不是工具的问题
+  - name: 某个搜索源没结果 / 报错
+    url: https://github.com/XCool-603/torrent-search/blob/main/CONTRIBUTING.md
+    about: 用 --sources <id> 单独试该源，并附上原始响应；站点改版是常见原因
+  - name: 使用问题与讨论
+    url: https://github.com/XCool-603/torrent-search/discussions
+    about: 不确定是不是 bug、想聊用法或部署，欢迎来 Discussions

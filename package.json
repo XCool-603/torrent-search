@@ -23,7 +23,8 @@
     "test": "node --test --test-timeout=30000",
     "lint": "node tools/lint.mjs",
     "fixtures": "node tools/capture-fixtures.mjs",
-    "smoke": "node tools/smoke.mjs"
+    "smoke": "node tools/smoke.mjs",
+    "screenshots": "node tools/make-screenshots.mjs"
   },
   "keywords": [
     "magnet",

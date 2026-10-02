@@ -1,11 +1,15 @@
-# 种子搜索
+﻿# 种子搜索
 
 聚合多个公开磁力/BT 索引站的**本地搜索工具**：命令行、Web UI、JSON API 三种用法，**零运行时依赖**（只用 Node 内置模块）。
+
+**中文** | [English](README.en.md)
 
 ```bash
 node bin/magnet-search.mjs "ubuntu 24.04"
 node bin/magnet-search.mjs serve          # 然后打开 http://127.0.0.1:8787
 ```
+
+![搜索结果](docs/screenshot-search.png)
 
 ---
 
@@ -19,7 +23,7 @@ node bin/magnet-search.mjs serve          # 然后打开 http://127.0.0.1:8787
 - **零依赖**：不需要 `npm install`，不需要构建步骤，Node ≥ 20 直接跑。
 - **代理支持**：`--proxy 127.0.0.1:7897` 或 `--proxy auto`（自动读系统代理，Windows 下会读注册表）。
 - **三种用法**：CLI（可管道/可脚本化）、Web UI（可视化）、JSON API（可被其它程序调用）。
-- **可验证**：141 个离线单元测试（真实响应夹具）+ 实网冒烟测试 + 项目自检（`npm run lint`）。
+- **可验证**：232 个离线单元测试（真实响应夹具）+ 实网冒烟测试 + 项目自检（`npm run lint`）。
 
 ---
 
@@ -190,6 +194,8 @@ node bin/magnet-search.mjs download "magnet:?..." --max-size 500 --dir D:\dl --n
 
 Web UI 里每条结果都有「下载」按钮，页面下方有下载面板（进度条 / 速度 / peer 数 / 取消 / 删除），
 实时进度走 SSE（`GET /api/downloads/stream`）。
+
+![下载面板](docs/screenshot-downloads.png)
 
 **引擎的能力边界（实话实说）：**
 
@@ -370,11 +376,12 @@ qBittorrent 要用 `host.docker.internal`、容器里 `doctor` 看不到宿主�
 ## 测试
 
 ```bash
-npm test           # 180 个离线单元测试：解析、聚合、过滤、缓存、HTTP、服务、BT 引擎、下载管理
+npm test           # 232 个离线单元测试：解析、聚合、过滤、缓存、HTTP、服务、BT 引擎、下载管理
 npm run lint       # 项目自检：全量语法检查 + 零依赖/无 XSS API/适配器契约等约定检查
 npm run smoke      # 实网冒烟：对每个在线源发真实请求并校验字段自洽性
 npm run fixtures   # 重新抓取测试夹具（站点改版后跑一次）
 npm run check      # 逐源连通性自检
+npm run screenshots # 重新生成 README 里的 Web UI 截图（用无头 Edge/Chrome，零依赖）
 ```
 
 测试分层：纯函数 → 解析层（真实夹具）→ 聚合层（注入假源，覆盖过滤/缓存/排序）→ 网络层（本机 HTTP + 自建 CONNECT 代理）
@@ -394,8 +401,9 @@ src/
   └── download/         任务管理器（排队、并发、进度事件、持久化）
 web/                    Web UI（原生 HTML/CSS/JS，无构建，含下载面板）
 test/                   离线测试 + 真实响应夹具 + 本地假种子群
-tools/                  夹具抓取、实网冒烟、项目自检（lint）
+tools/                  夹具抓取、实网冒烟、项目自检（lint）、截图生成
 docs/需求与架构设计.md   需求、数据源调研、架构与设计决策
+docs/screenshot-*.png   README 用的 Web UI 截图（npm run screenshots 重新生成）
 .github/workflows/      CI
 ```
 

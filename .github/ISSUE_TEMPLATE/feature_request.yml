@@ -1,0 +1,70 @@
+name: Feature request / 功能建议
+description: 新数据源、新选项、界面改进等建议
+title: '[Feature] '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提建议前请留意本项目的两条硬约束（见 [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md)）：
+
+        1. **零运行时依赖**——只用 Node 内置模块，不引入任何 npm 包；
+        2. **Node ≥ 20**，且要同时支持 Windows / Linux / macOS。
+
+        如果建议需要打破其中任一条，请在下面说明理由。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: 描述场景，而不是直接给方案——这样更容易找到更合适的做法
+      placeholder: 我经常要按体积区间筛选，现在只能手动看体积列……
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你期望的方案
+      placeholder: 加一个 --min-size / --max-size 选项，Web UI 上也加两个输入框
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及范围
+      options:
+        - 搜索（源、聚合、排序、过滤）
+        - 下载（BT 引擎、qBittorrent 桥接、任务管理）
+        - Web UI
+        - JSON API
+        - CLI
+        - 文档 / 工程
+        - 新增数据源
+    validations:
+      required: true
+
+  - type: input
+    id: source-site
+    attributes:
+      label: 新数据源的话，站点地址与接口形式
+      description: 请给出站点首页与可用的搜索接口（JSON / RSS / HTML），并确认该站允许程序访问
+      placeholder: https://example.org — RSS：https://example.org/rss?q=
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你考虑过的替代方案
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已经搜索过现有 issue
+          required: true
