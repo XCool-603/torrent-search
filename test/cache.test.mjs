@@ -30,6 +30,21 @@ test('DiskCache：写入后可读回，并带 mtime/age 信息', async () => {
   });
 });
 
+test('DiskCache：mtime 略微超前时 ageMs 钳为 0（Windows 时间戳取整）', async () => {
+  await withTempCache(async (cache) => {
+    await cache.set('future', 'data');
+
+    // 模拟 NTFS 时间戳取整：让 mtime 比当前时间晚几毫秒
+    const future = new Date(Date.now() + 5);
+    await fs.utimes(cache.filePath('future'), future, future);
+
+    const hit = await cache.get('future');
+    assert.ok(hit);
+    assert.equal(hit.ageMs, 0, '负数年龄没有意义，应钳为 0');
+    assert.ok(hit.mtimeMs > Date.now(), 'mtime 本身仍如实返回');
+  });
+});
+
 test('DiskCache：未命中返回 null 而不是抛异常', async () => {
   await withTempCache(async (cache) => {
     assert.equal(await cache.get('missing'), null);

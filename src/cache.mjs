@@ -61,7 +61,10 @@ export class DiskCache {
     const file = this.filePath(key);
     try {
       const stat = await fs.stat(file);
-      const ageMs = Date.now() - stat.mtimeMs;
+      // ageMs 钳到非负：Windows 上 NTFS 时间戳的精度/取整会让刚写入的文件
+      // mtime 比 Date.now() 略大，直接相减会得到 -0.x 这样的负数
+      // （Node 22 / windows 的 CI 抓到的真实问题）
+      const ageMs = Math.max(0, Date.now() - stat.mtimeMs);
       if (options.maxAgeMs !== undefined && ageMs > options.maxAgeMs) return null;
       const body = await fs.readFile(file);
       return { body, mtimeMs: stat.mtimeMs, ageMs };
