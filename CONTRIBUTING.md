@@ -174,6 +174,27 @@ publish) before pasting.
 
 ---
 
+## The bundled AI-agent skill
+
+`skills/torrent-search/` is a **DSH skill**: `SKILL.md` (frontmatter `name` + routing `description`) plus a
+wrapper script that gives an agent a compact JSON interface to this tool.
+
+```bash
+npm run install-skill      # junction into ~/.dsh/skills/torrent-search
+npm run install-skill -- --copy        # copy instead (no live sync)
+npm run install-skill -- --uninstall
+```
+
+Two rules when touching it:
+
+- **Keep the wrapper in-process.** It imports `src/` modules rather than spawning the CLI: in confined
+  sandboxes a child process with piped stdio can fail, and in-process is simply faster. The only
+  exception is `doctor`, which reuses the CLI with `stdio: 'inherit'` (no pipes).
+- **Update `SKILL.md` when behaviour changes.** It is the agent's contract — flag names, the JSON shape,
+  and the failure interpretations (`status` is the only success criterion; peer handshake errors mean the
+  network blocks P2P, not that the tool is broken). `test/skill.test.mjs` checks the frontmatter against
+  DSH's loader rules, the wrapper's command surface, and one end-to-end download through a local fake swarm.
+
 ## Regenerating the README screenshots
 
 ```bash

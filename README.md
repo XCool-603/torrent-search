@@ -1,4 +1,4 @@
-﻿# 种子搜索
+# 种子搜索
 
 聚合多个公开磁力/BT 索引站的**本地搜索工具**：命令行、Web UI、JSON API 三种用法，**零运行时依赖**（只用 Node 内置模块）。
 
@@ -301,6 +301,27 @@ const ctx = await createContext({ proxy: 'auto' });
 const { results, sources } = await searchAll({ query: 'blender', sort: 'seeders', ...ctx });
 console.log(results[0].magnet, sources);
 ```
+
+### 作为 AI Agent 的 skill 使用
+
+仓库里带了一个 **DSH skill**（`skills/torrent-search/`），让 AI Agent 能直接搜种子、挑结果、发起下载，
+并正确处理「下载不动」这类网络问题：
+
+```bash
+npm run install-skill     # 安装到 ~/.dsh/skills/torrent-search（目录联结，改仓库即生效）
+```
+
+装好后新会话里 Agent 就能在合适场景自动使用；也可以直接调用包装脚本：
+
+```bash
+node skills/torrent-search/scripts/torrent-search.mjs search "ubuntu 24.04" --limit 5
+node skills/torrent-search/scripts/torrent-search.mjs doctor
+node skills/torrent-search/scripts/torrent-search.mjs download "<磁力>" --dir D:\dl
+```
+
+包装脚本**直接调用项目模块**（不启动子进程），输出紧凑 JSON；`SKILL.md` 里固化了这些经验：
+磁力必须整体加引号、下载要当长任务处理、以 `status` 而不是进度条判断成败，
+以及「peer 握手被关闭 = 网络拦截 P2P，不是工具故障」这类结论。
 
 ---
 

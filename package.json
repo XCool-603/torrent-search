@@ -24,7 +24,8 @@
     "lint": "node tools/lint.mjs",
     "fixtures": "node tools/capture-fixtures.mjs",
     "smoke": "node tools/smoke.mjs",
-    "screenshots": "node tools/make-screenshots.mjs"
+    "screenshots": "node tools/make-screenshots.mjs",
+    "install-skill": "node tools/install-skill.mjs"
   },
   "keywords": [
     "magnet",

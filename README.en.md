@@ -1,4 +1,4 @@
-﻿# Torrent Search
+# Torrent Search
 
 A **local search tool** that aggregates several public magnet/BitTorrent indexers — usable as a CLI, a web UI, or a JSON API. **Zero runtime dependencies** (Node built-ins only).
 
@@ -286,6 +286,20 @@ const ctx = await createContext({ proxy: 'auto' });
 const { results, sources } = await searchAll({ query: 'blender', sort: 'seeders', ...ctx });
 console.log(results[0].magnet, sources);
 ```
+
+### As an AI-agent skill
+
+The repository ships a **DSH skill** (`skills/torrent-search/`) so an AI agent can search, pick a result,
+start a download, and handle the "download won't move" case correctly:
+
+```bash
+npm run install-skill     # installs to ~/.dsh/skills/torrent-search (directory junction: edits apply live)
+```
+
+The wrapper calls the project modules **in-process** (no subprocess) and emits compact JSON.
+`SKILL.md` encodes the hard-won rules: quote magnet links, treat downloads as long-running background
+tasks, judge success by `status` rather than a progress bar, and read "peer handshake closed" as the
+network blocking P2P rather than a tool defect.
 
 ---
 
