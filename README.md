@@ -446,9 +446,25 @@ node tools/remote-deploy.mjs tunnel --host user@server
 # 然后本地浏览器打开 http://127.0.0.1:8787/
 ```
 
-要让局域网内其它设备直接访问，在服务器的 `.env` 里设 `TORRENT_SEARCH_BIND=0.0.0.0` 并重跑
-upgrade，同时确保防火墙只放行可信网段。**不要**把它直接暴露到公网——需要的话请放在带鉴权的
-反向代理之后。
+**要让局域网内其它设备直接访问**（自担风险：同网段的人都能用）：
+
+```bash
+node tools/remote-deploy.mjs deploy --host user@server --bind 0.0.0.0
+```
+
+它会把服务器 `.env` 里的 `TORRENT_SEARCH_BIND` 改成 `0.0.0.0` 并重新部署，然后告诉你地址。
+还需要放行端口——**两道门都要开**：
+
+```bash
+# ① 服务器自身防火墙（按发行版选一条）
+sudo ufw allow from 192.168.0.0/16 to any port 8787 proto tcp
+sudo firewall-cmd --permanent --add-port=8787/tcp && sudo firewall-cmd --reload
+
+# ② 云服务器还要在控制台的「安全组」里放行 8787，来源只填你的内网网段
+```
+
+> **不要**把它直接暴露到公网——那等于把一个"能往服务器写文件"的接口敞开。
+> 确实需要公网访问时，请放在带鉴权的反向代理（Caddy / nginx basic auth）之后。
 
 ### 配置
 
@@ -477,16 +493,18 @@ upgrade，同时确保防火墙只放行可信网段。**不要**把它直接暴
 docker compose exec torrent-search node bin/magnet-search.mjs doctor
 ```
 
-> **Linux / NAS 上的下载目录权限**：容器以固定 UID/GID `10001` 运行（非 root）。
-> 绑定挂载 `./downloads` 时，宿主目录必须能被这个 UID 写入，否则下载会报权限错误。两种解法：
+> **Linux / NAS 上的下载目录权限**：容器以非 root 运行，而绑定挂载的目录属主由宿主机决定——
+> 如果两边 UID 不一致，下载会报权限错误（`docker compose up` 还会以 root 创建缺失的 `./downloads`）。
+> `scripts/docker.sh` 在 **Linux 上会自动按当前用户重建镜像**（`--build-arg UID/GID`）并预建下载目录，
+> 所以用脚本部署时不需要额外处理。如果你手动跑 `docker compose`，请自己对齐：
 >
 > ```bash
-> sudo chown -R 10001:10001 ./downloads      # ① 把宿主目录交给容器用户
-> # ② 或者用宿主当前用户重建镜像，让两边 UID 一致：
-> docker compose build --build-arg UID=$(id -u) --build-arg GID=$(id -g)
+> mkdir -p downloads
+> docker compose build --build-arg UID=$(id -u) --build-arg GID=$(id -g) && docker compose up -d
 > ```
 >
-> Docker Desktop（Windows/macOS）的绑定挂载是宽松的，通常不需要处理。
+> Docker Desktop（Windows/macOS）的绑定挂载是模拟的、宽松的，不需要处理。
+> 需要临时关掉自动对齐：`TORRENT_SEARCH_FIX_OWNER=0 sh scripts/docker.sh deploy`。
 
 ### 容器化的三个实话
 

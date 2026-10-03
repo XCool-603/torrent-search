@@ -91,11 +91,60 @@ ensure_env_file() {
   fi
 }
 
+# 绑定挂载的目录属主由宿主机决定，容器里的属主会被盖掉：
+#   - Docker 在宿主机上以 root 创建缺失的挂载源目录（例如 ./downloads）；
+#   - 容器以非 root（镜像里的 UID/GID 10001）运行 → 写不进去 → 下载报权限错误。
+# 解法是让两边 UID/GID 一致：在 Linux 上按当前用户重建镜像。
+# （Docker Desktop 的绑定挂载是模拟的、宽松的，不需要也不该传这些参数。）
+build_args() {
+  if [ "${TORRENT_SEARCH_FIX_OWNER:-1}" = "0" ]; then
+    return 0
+  fi
+  if [ "$(uname -s 2>/dev/null)" = "Linux" ] && command -v id >/dev/null 2>&1; then
+    printf -- '--build-arg UID=%s --build-arg GID=%s' "$(id -u)" "$(id -g)"
+  fi
+}
+
+# 准备好宿主机上的下载目录（存在就不动），避免 Docker 用 root 创建
+prepare_downloads_dir() {
+  DIR=$(resolve_downloads_dir)
+  case "$DIR" in
+    /*) TARGET="$DIR" ;;
+    *) TARGET="./${DIR#./}" ;;
+  esac
+  [ -d "$TARGET" ] || mkdir -p "$TARGET" 2>/dev/null || true
+}
+
+# 构建镜像（带上属主对齐参数）
+build_image() {
+  # shellcheck disable=SC2086
+  compose build $(build_args)
+}
+
 print_url() {
   PORT=$(resolve_port)
   printf '\n  Web UI   http://127.0.0.1:%s/\n' "$PORT"
   printf '  JSON API http://127.0.0.1:%s/api/search?q=ubuntu\n' "$PORT"
   printf '  下载目录 %s（宿主机）\n' "$(resolve_downloads_dir)"
+
+  BIND=$(resolve_bind)
+  if [ "$BIND" != "127.0.0.1" ]; then
+    # 绑到了非回环：提示局域网地址与"没有鉴权"这件事
+    LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [ -n "$LAN_IP" ] || LAN_IP=$(ipconfig getifaddr en0 2>/dev/null)
+    printf '\n  监听 %s：局域网内可通过 http://%s:%s/ 访问\n' "$BIND" "${LAN_IP:-<服务器IP>}" "$PORT"
+    printf '  注意：本服务没有鉴权，请确保防火墙/安全组只放行可信网段\n'
+  fi
+}
+
+# 读取 .env 里的监听地址（没有就用默认值：只绑回环）
+resolve_bind() {
+  BIND=""
+  if [ -f .env ]; then
+    BIND=$(grep -E '^TORRENT_SEARCH_BIND=' .env 2>/dev/null | tail -n 1 | cut -d= -f2 | tr -d ' \r')
+  fi
+  [ -n "$BIND" ] || BIND=127.0.0.1
+  printf '%s' "$BIND"
 }
 
 resolve_downloads_dir() {
@@ -112,9 +161,11 @@ resolve_downloads_dir() {
 cmd_deploy() {
   detect_compose
   ensure_env_file
+  prepare_downloads_dir
 
   printf '\n▸ 构建并启动容器（首次构建需要几分钟）\n'
-  compose up -d --build
+  build_image
+  compose up -d
 
   printf '\n▸ 等待健康检查通过\n'
   if wait_healthy; then
@@ -191,10 +242,14 @@ cmd_upgrade() {
   fi
 
   printf '\n▸ 重建并重启容器（下载文件与任务记录不受影响）\n'
+  prepare_downloads_dir
   if [ -n "$NO_CACHE" ]; then
-    compose build --no-cache
+    # shellcheck disable=SC2086
+    compose build --no-cache $(build_args)
+  else
+    build_image
   fi
-  compose up -d --build
+  compose up -d
 
   printf '\n▸ 等待健康检查通过\n'
   if wait_healthy; then
@@ -210,7 +265,8 @@ cmd_upgrade() {
   if [ -d .git ] && [ -n "${BEFORE:-}" ]; then
     printf '\n▸ 回滚到 %s\n' "$BEFORE" >&2
     git checkout --quiet "$BEFORE" || true
-    compose up -d --build || true
+    build_image || true
+    compose up -d || true
     printf '  已回滚。请把上面的日志作为 issue 反馈。\n' >&2
   else
     printf '  无法自动回滚（不是 git 仓库或没有记录升级前版本）。\n' >&2

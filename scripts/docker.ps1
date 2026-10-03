@@ -103,6 +103,42 @@ function Get-DownloadsDir {
   return $dir
 }
 
+function Get-Bind {
+  $bind = Get-EnvValue 'TORRENT_SEARCH_BIND'
+  if ([string]::IsNullOrWhiteSpace($bind)) { return '127.0.0.1' }
+  return $bind
+}
+
+# 绑定挂载的目录属主由宿主机决定，容器里的属主会被盖掉：
+#   - Docker 在宿主机上以 root 创建缺失的挂载源目录（例如 ./downloads）；
+#   - 容器以非 root（镜像里的 UID/GID 10001）运行 → 写不进去 → 下载报权限错误。
+# 在 Linux 上按当前用户重建镜像即可对齐（Docker Desktop 的绑定挂载是模拟的、宽松的，不需要）。
+function Get-BuildArgs {
+  if ($env:TORRENT_SEARCH_FIX_OWNER -eq '0') { return @() }
+  if (-not $IsLinux) { return @() }
+  $uid = (& id -u).Trim()
+  $gid = (& id -g).Trim()
+  if ([string]::IsNullOrWhiteSpace($uid)) { return @() }
+  return @('--build-arg', "UID=$uid", '--build-arg', "GID=$gid")
+}
+
+function Invoke-Build {
+  $buildArgs = @('build') + (Get-BuildArgs)
+  Invoke-Compose @buildArgs
+  return $LASTEXITCODE
+}
+
+# 准备好宿主机上的下载目录（存在就不动），避免 Docker 用 root 创建
+function Initialize-DownloadsDir {
+  $dir = Get-DownloadsDir
+  try {
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+  }
+  catch {
+    Write-Info "提示：无法创建下载目录 $dir，若之后下载报权限错误请手动处理"
+  }
+}
+
 function Wait-Healthy {
   # 用容器自带的 wget（alpine 的 busybox 有）而不是 `node -e "<一段 JS>"`：
   # 后者含有 > 与 || 这类字符，一旦调用链里经过 cmd.exe（例如用 .cmd 包装的 docker），
@@ -121,6 +157,13 @@ function Show-Result {
   Write-Host "  Web UI   http://127.0.0.1:$port/"
   Write-Host "  JSON API http://127.0.0.1:$port/api/search?q=ubuntu"
   Write-Host "  下载目录 $(Get-DownloadsDir)（宿主机）"
+
+  $bind = Get-Bind
+  if ($bind -ne '127.0.0.1') {
+    Write-Host ""
+    Write-Host "  监听 $bind：局域网内可通过 http://<服务器IP>:$port/ 访问"
+    Write-Host "  注意：本服务没有鉴权，请确保防火墙/安全组只放行可信网段"
+  }
 }
 
 function Initialize-EnvFile {
@@ -135,11 +178,13 @@ function Initialize-EnvFile {
 function Invoke-Deploy {
   Initialize-Compose
   Initialize-EnvFile
+  Initialize-DownloadsDir
 
   Write-Host ""
   Write-Host '> 构建并启动容器（首次构建需要几分钟）'
-  Invoke-Compose up -d --build
-  if ($LASTEXITCODE -ne 0) { Stop-WithError '构建或启动失败，请检查上面的输出。' }
+  if ((Invoke-Build) -ne 0) { Stop-WithError '构建失败，请检查上面的输出。' }
+  Invoke-Compose up -d
+  if ($LASTEXITCODE -ne 0) { Stop-WithError '启动失败，请检查上面的输出。' }
 
   Write-Host ""
   Write-Host '> 等待健康检查通过'
@@ -237,8 +282,15 @@ function Invoke-Upgrade {
 
   Write-Host ""
   Write-Host '> 重建并重启容器（下载文件与任务记录不受影响）'
-  if ($noCache) { Invoke-Compose build --no-cache }
-  Invoke-Compose up -d --build
+  Initialize-DownloadsDir
+  if ($noCache) {
+    $noCacheArgs = @('build', '--no-cache') + (Get-BuildArgs)
+    Invoke-Compose @noCacheArgs
+  }
+  else {
+    Invoke-Build | Out-Null
+  }
+  Invoke-Compose up -d
   if ($LASTEXITCODE -ne 0) { Stop-WithError '构建或启动失败，请检查上面的输出。' }
 
   Write-Host ""
@@ -258,7 +310,8 @@ function Invoke-Upgrade {
     Write-Host ""
     Write-Host "> 回滚到 $before" -ForegroundColor Red
     & git checkout --quiet $before
-    Invoke-Compose up -d --build
+    Invoke-Build | Out-Null
+    Invoke-Compose up -d
     Write-Host '  已回滚。请把上面的日志作为 issue 反馈。'
   }
   else {

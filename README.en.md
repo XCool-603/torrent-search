@@ -432,9 +432,26 @@ node tools/remote-deploy.mjs tunnel --host user@server
 # then open http://127.0.0.1:8787/ locally
 ```
 
-To let other devices on your LAN connect, set `TORRENT_SEARCH_BIND=0.0.0.0` in the server's `.env` and
-run `upgrade` again, making sure the firewall only allows trusted subnets. **Do not** expose it directly
-to the internet — put it behind an authenticating reverse proxy if you need that.
+**To let other devices on your LAN connect directly** (at your own risk: anyone on that subnet can use it):
+
+```bash
+node tools/remote-deploy.mjs deploy --host user@server --bind 0.0.0.0
+```
+
+This sets `TORRENT_SEARCH_BIND=0.0.0.0` in the server's `.env`, redeploys, and prints the address.
+You still have to open the port — **two gates**:
+
+```bash
+# 1) the server's own firewall (pick one)
+sudo ufw allow from 192.168.0.0/16 to any port 8787 proto tcp
+sudo firewall-cmd --permanent --add-port=8787/tcp && sudo firewall-cmd --reload
+
+# 2) on a cloud server, also allow 8787 in the provider's security group, restricted to your LAN range
+```
+
+> **Do not** expose it directly to the internet — that opens an endpoint that can write files on your
+> server. If you really need public access, put it behind an authenticating reverse proxy
+> (Caddy / nginx basic auth).
 
 ### Configuration
 
@@ -463,17 +480,19 @@ Diagnostics inside the container:
 docker compose exec torrent-search node bin/magnet-search.mjs doctor
 ```
 
-> **Download directory permissions on Linux / NAS**: the container runs as a fixed UID/GID `10001`
-> (non-root). With the `./downloads` bind mount, the host directory must be writable by that UID or
-> downloads fail with a permission error. Two fixes:
+> **Download directory permissions on Linux / NAS**: the container runs as non-root, while a bind mount's
+> ownership comes from the host — mismatched UIDs make downloads fail with a permission error (`docker
+> compose up` also creates a missing `./downloads` as root). `scripts/docker.sh` **rebuilds with your own
+> UID/GID on Linux** (`--build-arg`) and pre-creates the download directory, so scripted deployments need
+> no extra steps. If you run `docker compose` by hand, align them yourself:
 >
 > ```bash
-> sudo chown -R 10001:10001 ./downloads      # 1) give the host directory to the container user
-> # 2) or rebuild with your own UID/GID so both sides match:
-> docker compose build --build-arg UID=$(id -u) --build-arg GID=$(id -g)
+> mkdir -p downloads
+> docker compose build --build-arg UID=$(id -u) --build-arg GID=$(id -g) && docker compose up -d
 > ```
 >
-> Docker Desktop bind mounts (Windows/macOS) are permissive, so this usually needs no action.
+> Docker Desktop bind mounts (Windows/macOS) are permissive, so this needs no action.
+> To opt out of the automatic alignment: `TORRENT_SEARCH_FIX_OWNER=0 sh scripts/docker.sh deploy`.
 
 ### Three honest notes about containerising
 

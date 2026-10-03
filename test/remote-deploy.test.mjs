@@ -258,5 +258,51 @@ test('remote-deploy：--identity 与 --ssh-port 会传给 ssh', async () => {
   });
 });
 
+test('remote-deploy：--bind 会在服务器上设置监听地址并给出防火墙提示', async () => {
+  await withWorkspace(async (ctx) => {
+    const result = await ctx.run(['deploy', '--host', 'u@h', '--dir', '/srv/ts', '--bind', '0.0.0.0']);
+    assert.equal(result.code, 0, result.output);
+
+    const calls = await ctx.readLog();
+    // 顺序：推送 → 设置 .env → 部署
+    assert.equal(calls.length, 3, `应有三次 ssh 调用，实际 ${calls.length}`);
+
+    const setBind = calls[1].join(' ');
+    assert.match(setBind, /TORRENT_SEARCH_BIND=0\.0\.0\.0/, '应写入 .env');
+    assert.match(setBind, /cp \.env\.example \.env/, '.env 不存在时应从示例生成');
+    assert.match(setBind, /sed -i/, '已有该键时应就地替换而不是追加');
+
+    // 提示里要给出局域网地址与防火墙命令，并重申"没有鉴权"
+    assert.match(result.output, /局域网访问已开启/);
+    assert.match(result.output, /ufw allow/);
+    assert.match(result.output, /安全组/);
+    assert.match(result.output, /没有鉴权/);
+  });
+});
+
+test('remote-deploy：--bind 只接受 IP 字面量（防命令注入）', async () => {
+  await withWorkspace(async (ctx) => {
+    const result = await ctx.run(['deploy', '--host', 'u@h', '--bind', '0.0.0.0; rm -rf /']);
+    assert.equal(result.code, 1);
+    assert.match(result.output, /只接受 IP 字面量/);
+
+    // 危险的串绝不能进到远端命令里
+    const calls = await ctx.readLog();
+    assert.ok(!calls.some((call) => call.join(' ').includes('rm -rf')), '不应把注入内容发到远端');
+  });
+});
+
+test('remote-deploy：默认（不加 --bind）只提示隧道访问', async () => {
+  await withWorkspace(async (ctx) => {
+    const result = await ctx.run(['deploy', '--host', 'u@h']);
+    assert.equal(result.code, 0, result.output);
+
+    const calls = await ctx.readLog();
+    assert.equal(calls.length, 2, '不加 --bind 时不该多一次设置 .env 的调用');
+    assert.match(result.output, /tunnel --host u@h/);
+    assert.ok(!result.output.includes('局域网访问已开启'));
+  });
+});
+
 // 保留 spawn 引用，避免未使用导入告警（未来加交互式用例时会用到）
 void spawn;

@@ -247,7 +247,12 @@ test('docker.sh：deploy 成功时构建、健康检查并给出访问地址', {
     assert.match(result.output, /Web UI/);
 
     const calls = await readCalls(ctx.logFile);
-    assert.match(calls, /compose up -d --build/);
+    assert.match(calls, /compose build/);
+    assert.match(calls, /compose up -d/);
+    // Linux 上必须按当前用户重建镜像：否则 Docker 以 root 创建 ./downloads，
+    // 容器里的非 root 用户写不进去，下载会直接报权限错误
+    assert.match(calls, /--build-arg UID=\d+/);
+    assert.match(calls, /--build-arg GID=\d+/);
     await fs.access(path.join(ctx.deployDir, '.env')); // 自动从 .env.example 生成
   });
 });
@@ -275,7 +280,8 @@ test('docker.sh：upgrade 拉取代码、重建并健康检查', { skip: IS_WIND
     assert.match(result.output, /升级完成/);
 
     const calls = await readCalls(ctx.logFile);
-    assert.match(calls, /compose up -d --build/);
+    assert.match(calls, /compose build/);
+    assert.match(calls, /compose up -d/);
   });
 });
 
@@ -330,7 +336,8 @@ test('docker.sh：升级后健康检查失败会回滚到升级前的提交', { 
     assert.equal(after.trim(), before.trim(), '应回到升级前的提交');
 
     const calls = await readCalls(ctx.logFile);
-    assert.equal((calls.match(/compose up -d --build/g) ?? []).length, 2, '回滚后应重新构建一次');
+    assert.equal((calls.match(/compose up -d/g) ?? []).length, 2, '回滚后应重新启动一次');
+    assert.equal((calls.match(/compose build/g) ?? []).length, 2, '回滚后应重新构建一次');
   });
 });
 
@@ -427,8 +434,11 @@ test('docker.ps1：deploy 成功时构建、健康检查并生成 .env', { skip:
     assert.equal(result.code, 0, result.output);
 
     const calls = await readCalls(ctx.logFile);
-    assert.match(calls, /compose up -d --build/);
+    assert.match(calls, /compose build/);
+    assert.match(calls, /compose up -d/);
     assert.match(calls, /compose exec -T torrent-search wget/);
+    // Docker Desktop 的绑定挂载是模拟的、宽松的，不需要（也不该）传属主参数
+    assert.ok(!calls.includes('--build-arg'), 'Windows 上不该传 --build-arg');
     await fs.access(path.join(ctx.deployDir, '.env'));
   });
 });
@@ -450,7 +460,8 @@ test('docker.ps1：upgrade 成功时拉取代码并重建', { skip: IS_WINDOWS ?
     assert.equal(result.code, 0, result.output);
 
     const calls = await readCalls(ctx.logFile);
-    assert.match(calls, /compose up -d --build/);
+    assert.match(calls, /compose build/);
+    assert.match(calls, /compose up -d/);
   });
 });
 
@@ -489,7 +500,8 @@ test('docker.ps1：升级后健康检查失败会回滚到升级前的提交', {
     assert.equal(after.trim(), before.trim(), '应回到升级前的提交');
 
     const calls = await readCalls(ctx.logFile);
-    assert.equal((calls.match(/compose up -d --build/g) ?? []).length, 2, '回滚后应重新构建一次');
+    assert.equal((calls.match(/compose up -d/g) ?? []).length, 2, '回滚后应重新启动一次');
+    assert.equal((calls.match(/compose build/g) ?? []).length, 2, '回滚后应重新构建一次');
   });
 });
 

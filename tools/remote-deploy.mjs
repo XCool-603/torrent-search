@@ -133,7 +133,10 @@ const USAGE = `部署 / 升级到远程服务器（需要服务器已装 Docker�
 选项：
   --host <user@server>   必填（除了 help）
   --dir <路径>           服务器上的部署目录，默认 /opt/torrent-search
-  --port <端口>          服务器上发布的端口，默认 8787（用于 tunnel 提示）
+  --port <端口>          服务器上发布的端口，默认 8787（用于 tunnel 与提示）
+  --bind <IP>            deploy/upgrade 时同时设置服务器上的监听地址：
+                         默认 127.0.0.1（只本机，配合 tunnel）；
+                         设 0.0.0.0 表示允许局域网访问（本服务无鉴权，请配好防火墙）
   --identity <私钥文件>  传给 ssh -i
   --ssh-port <端口>      ssh 端口，默认 22
   --ssh <命令>           ssh 可执行文件（默认 ssh；也可用环境变量 TORRENT_SEARCH_SSH）
@@ -339,6 +342,37 @@ async function pushTree(options, dir) {
 }
 
 /**
+ * 在服务器上的 .env 里设置监听地址。
+ *
+ * 只改这一个键，其余内容与注释原样保留；.env 不存在时先从 .env.example 生成。
+ * 用 sed 而不是重写整个文件，是为了不碰用户自己加的其他配置。
+ *
+ * @param {Record<string, string>} options
+ * @param {string} dir
+ * @param {string} bind
+ * @returns {Promise<number>}
+ */
+async function setRemoteBind(options, dir, bind) {
+  // 这个值会被插进远端 shell 命令，必须白名单化（只允许 IP 字面量），否则就是命令注入
+  if (!/^[0-9a-fA-F.:]+$/.test(bind)) {
+    throw new Error(`--bind 只接受 IP 字面量（例如 0.0.0.0 或 127.0.0.1），收到：${bind}`);
+  }
+
+  const remote = [
+    `cd ${quote(dir)}`,
+    '[ -f .env ] || cp .env.example .env',
+    `if grep -q '^TORRENT_SEARCH_BIND=' .env; then`,
+    `sed -i "s|^TORRENT_SEARCH_BIND=.*|TORRENT_SEARCH_BIND=${bind}|" .env;`,
+    `else`,
+    `printf '\\nTORRENT_SEARCH_BIND=${bind}\\n' >> .env;`,
+    `fi`,
+    `echo "TORRENT_SEARCH_BIND=${bind}"`,
+  ].join(' ');
+
+  return await runSsh(options, remote);
+}
+
+/**
  * 在服务器上调用 scripts/docker.sh。
  *
  * @param {Record<string, string>} options
@@ -353,12 +387,28 @@ async function runRemoteScript(options, dir, command) {
 
 function printAccess(options) {
   const port = options.port ?? '8787';
+  const dir = options.dir ?? '/opt/torrent-search';
+
+  if (options.bind && options.bind !== '127.0.0.1') {
+    process.stdout.write(
+      `\n局域网访问已开启（监听 ${options.bind}）：\n` +
+        `  http://<服务器IP>:${port}/\n` +
+        `\n  还需要放行端口（二选一，按你的发行版）：\n` +
+        `    sudo ufw allow from 192.168.0.0/16 to any port ${port} proto tcp     # ufw\n` +
+        `    sudo firewall-cmd --permanent --add-port=${port}/tcp && sudo firewall-cmd --reload  # firewalld\n` +
+        `  云服务器还要在控制台的**安全组**里放行该端口，并且只填可信来源网段。\n` +
+        `\n  ⚠ 本服务没有鉴权：能访问到它的人都能创建下载任务（往下载目录写文件）。\n` +
+        `    只在可信网络里这样用；要公网访问请放在带鉴权的反向代理之后。\n`,
+    );
+    return;
+  }
+
   process.stdout.write(
     `\n访问方式（服务默认只绑服务器回环，所以需要隧道）：\n` +
       `  node tools/remote-deploy.mjs tunnel --host ${options.host} --port ${port}\n` +
       `  然后本地浏览器打开 http://127.0.0.1:${port}/\n` +
-      `\n  想让局域网直接访问：在服务器的 ${options.dir ?? '/opt/torrent-search'}/.env 里设\n` +
-      `  TORRENT_SEARCH_BIND=0.0.0.0，再跑一次 upgrade，并确保防火墙只放行可信网段。\n`,
+      `\n  想让局域网直接访问：加 --bind 0.0.0.0 重新部署，或在 ${dir}/.env 里设\n` +
+      `  TORRENT_SEARCH_BIND=0.0.0.0 后重跑 upgrade，并确保防火墙只放行可信网段。\n`,
   );
 }
 
@@ -378,6 +428,10 @@ async function main() {
   switch (command) {
     case 'deploy': {
       await pushTree(options, dir);
+      if (options.bind) {
+        const bindCode = await setRemoteBind(options, dir, String(options.bind));
+        if (bindCode !== 0) throw new Error('在服务器上设置监听地址失败');
+      }
       const code = await runRemoteScript(options, dir, ['deploy']);
       if (code !== 0) throw new Error(`服务器上的部署失败（退出码 ${code}）`);
       printAccess(options);
@@ -385,6 +439,10 @@ async function main() {
     }
     case 'upgrade': {
       await pushTree(options, dir);
+      if (options.bind) {
+        const bindCode = await setRemoteBind(options, dir, String(options.bind));
+        if (bindCode !== 0) throw new Error('在服务器上设置监听地址失败');
+      }
       const args = options.ref ? ['upgrade', '--ref', String(options.ref)] : ['upgrade'];
       const code = await runRemoteScript(options, dir, args);
       if (code !== 0) throw new Error(`服务器上的升级失败（退出码 ${code}）`);
