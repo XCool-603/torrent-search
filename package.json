@@ -25,7 +25,8 @@
     "fixtures": "node tools/capture-fixtures.mjs",
     "smoke": "node tools/smoke.mjs",
     "screenshots": "node tools/make-screenshots.mjs",
-    "install-skill": "node tools/install-skill.mjs"
+    "install-skill": "node tools/install-skill.mjs",
+    "deploy": "node tools/remote-deploy.mjs"
   },
   "keywords": [
     "magnet",

@@ -415,6 +415,41 @@ sh scripts/docker.sh down     # 停止并移除容器（下载文件保留）
 > 慢机器上健康检查可能等不够（默认等 30 次 × 2 秒）：
 > `TORRENT_SEARCH_HEALTH_ATTEMPTS=60 sh scripts/docker.sh deploy`
 
+### 部署到服务器
+
+服务器上装了 Docker 就能跑，步骤与本机完全一致：
+
+```bash
+# 在服务器上
+git clone https://github.com/XCool-603/torrent-search.git /opt/torrent-search
+cd /opt/torrent-search && sh scripts/docker.sh deploy
+```
+
+不想在服务器上装 git？从你本机推过去即可（**只依赖 ssh 与 tar**，不要求服务器装 git 或 Node）：
+
+```bash
+node tools/remote-deploy.mjs deploy  --host user@server --dir /opt/torrent-search
+node tools/remote-deploy.mjs upgrade --host user@server --ref v1.1.0   # 一键升级 / 切版本
+node tools/remote-deploy.mjs status  --host user@server
+node tools/remote-deploy.mjs logs    --host user@server
+node tools/remote-deploy.mjs doctor  --host user@server                # 在容器内诊断
+```
+
+> 推送时 `.env` 与 `downloads/` **永远不会被覆盖**——那是服务器上的配置和你的下载文件。
+> 代码以 tar 流传输，服务器的目录会被整体替换，所以别把别的东西放进部署目录。
+
+**安全（重要）**：本服务**没有鉴权**，任何能访问到它的人都能创建下载任务（往下载目录写文件）。
+所以容器**默认只绑服务器回环**，从本机用 SSH 隧道访问：
+
+```bash
+node tools/remote-deploy.mjs tunnel --host user@server
+# 然后本地浏览器打开 http://127.0.0.1:8787/
+```
+
+要让局域网内其它设备直接访问，在服务器的 `.env` 里设 `TORRENT_SEARCH_BIND=0.0.0.0` 并重跑
+upgrade，同时确保防火墙只放行可信网段。**不要**把它直接暴露到公网——需要的话请放在带鉴权的
+反向代理之后。
+
 ### 配置
 
 所有可调项都在 `.env`（由 `.env.example` 生成）：

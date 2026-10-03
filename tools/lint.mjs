@@ -161,34 +161,55 @@ async function checkNoRuntimeDependencies() {
 }
 
 /**
- * 脚本文件的编码约定。
+ * 源码文件的 BOM 约定。
  *
- * 这两个要求是**相反的**，而且都踩过：
+ * 这两条要求是**相反的**，而且都踩过：
  *   - .ps1 含中文时必须带 UTF-8 BOM：Windows PowerShell 5.1 没有 BOM 会按 ANSI(GBK) 解码，
  *     中文被拆坏后连字符串引号都会被吃掉，直接变成语法错误；
- *   - .sh 绝不能带 BOM：BOM 会跑到 shebang 前面，脚本无法执行。
+ *   - 其它源码（.mjs/.js/.sh）绝不能带 BOM：.sh 的 shebang 会被破坏，
+ *     .mjs 的 shebang 同样会被破坏（`#!/usr/bin/env node` 前多三个字节就报语法错误）。
  *
- * 编辑 .ps1 的工具（包括本仓库用的编辑器）常常会把 BOM 丢掉，所以必须由 lint 兜住。
+ * 编辑 .ps1 的工具常常会丢 BOM，而 PowerShell 的 `Set-Content -Encoding UTF8`
+ * 又会给别的文件加上 BOM——两头都发生过，所以必须由 lint 兜住。
  */
 async function checkScriptEncodings() {
-  const expectations = [
-    { file: 'scripts/docker.ps1', bom: true, why: 'Windows PowerShell 5.1 需要 UTF-8 BOM 才能正确读中文' },
-    { file: 'scripts/docker.sh', bom: false, why: 'BOM 会破坏 shebang' },
-  ];
+  const BOM = [0xef, 0xbb, 0xbf];
 
-  for (const { file, bom, why } of expectations) {
-    let buffer;
-    try {
-      buffer = await fs.readFile(path.join(ROOT, file));
-    } catch {
-      problems.push(`缺少部署脚本 ${file}`);
-      continue;
+  const hasBom = (buffer) => buffer.length >= 3 && buffer[0] === BOM[0] && buffer[1] === BOM[1] && buffer[2] === BOM[2];
+
+  // ① .ps1 必须带 BOM
+  const ps1 = path.join(ROOT, 'scripts', 'docker.ps1');
+  try {
+    if (!hasBom(await fs.readFile(ps1))) {
+      problems.push('scripts/docker.ps1 缺少 UTF-8 BOM：Windows PowerShell 5.1 需要它才能正确读中文');
     }
-
-    const hasBom = buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf;
-    if (bom && !hasBom) problems.push(`${file} 缺少 UTF-8 BOM：${why}`);
-    if (!bom && hasBom) problems.push(`${file} 不应带 UTF-8 BOM：${why}`);
+  } catch {
+    problems.push('缺少部署脚本 scripts/docker.ps1');
   }
+
+  // ② 其它源码一律不能带 BOM
+  const SKIP_DIRS = new Set(['.git', '.cache', 'downloads', 'node_modules', 'fixtures']);
+  const walk = async (dir) => {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        await walk(path.join(dir, entry.name));
+        continue;
+      }
+      if (!/\.(mjs|js|sh)$/.test(entry.name)) continue;
+      const full = path.join(dir, entry.name);
+      if (hasBom(await fs.readFile(full))) {
+        problems.push(`${path.relative(ROOT, full)} 不应带 UTF-8 BOM（会破坏 shebang / 解析）`);
+      }
+    }
+  };
+  await walk(ROOT);
 
   checked.rules += 1;
 }

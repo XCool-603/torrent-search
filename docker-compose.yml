@@ -18,7 +18,10 @@ services:
     init: true
 
     ports:
-      - "${TORRENT_SEARCH_PORT:-8787}:8787"
+      # 默认只发布到宿主机回环：本服务**没有鉴权**，任何能访问到它的人都能创建下载任务
+      # （往下载目录写文件）。服务器上请用 SSH 隧道访问，或显式设 TORRENT_SEARCH_BIND=0.0.0.0
+      # 并自行加防火墙/反向代理鉴权。
+      - "${TORRENT_SEARCH_BIND:-127.0.0.1}:${TORRENT_SEARCH_PORT:-8787}:8787"
 
     environment:
       TORRENT_SEARCH_HOST: 0.0.0.0

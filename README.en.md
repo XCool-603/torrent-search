@@ -398,6 +398,44 @@ sh scripts/docker.sh down     # stop and remove the container (downloads are kep
 > On a slow machine the health check may need longer than the default 30 × 2 s:
 > `TORRENT_SEARCH_HEALTH_ATTEMPTS=60 sh scripts/docker.sh deploy`
 
+### Deploying to a server
+
+Any server with Docker works exactly like a local machine:
+
+```bash
+# on the server
+git clone https://github.com/XCool-603/torrent-search.git /opt/torrent-search
+cd /opt/torrent-search && sh scripts/docker.sh deploy
+```
+
+Rather not install git on the server? Push from your machine instead — this needs **only ssh and tar**,
+not git or Node on the server:
+
+```bash
+node tools/remote-deploy.mjs deploy  --host user@server --dir /opt/torrent-search
+node tools/remote-deploy.mjs upgrade --host user@server --ref v1.1.0   # upgrade / pin a version
+node tools/remote-deploy.mjs status  --host user@server
+node tools/remote-deploy.mjs logs    --host user@server
+node tools/remote-deploy.mjs doctor  --host user@server                # diagnose inside the container
+```
+
+> `.env` and `downloads/` are **never overwritten** when pushing — that is your configuration and your
+> downloaded files. The code is transferred as a tar stream and the target directory is replaced, so do
+> not keep unrelated files there.
+
+**Security (important)**: this service has **no authentication** — anyone who can reach it can create
+download tasks (and thus write files into the download directory). The container therefore binds to the
+server's loopback by default; reach it through an SSH tunnel:
+
+```bash
+node tools/remote-deploy.mjs tunnel --host user@server
+# then open http://127.0.0.1:8787/ locally
+```
+
+To let other devices on your LAN connect, set `TORRENT_SEARCH_BIND=0.0.0.0` in the server's `.env` and
+run `upgrade` again, making sure the firewall only allows trusted subnets. **Do not** expose it directly
+to the internet — put it behind an authenticating reverse proxy if you need that.
+
 ### Configuration
 
 Everything tunable lives in `.env` (created from `.env.example`):
