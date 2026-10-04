@@ -35,6 +35,7 @@ import {
   searchOne,
 } from '../src/index.mjs';
 import { startServer } from '../src/server.mjs';
+import { createCoverFinder } from '../src/covers.mjs';
 import { COLORS, createColorizer, renderResultsTable, renderSourceStatus } from '../src/format.mjs';
 
 const COMMANDS = new Set(['search', 'serve', 'sources', 'check', 'download', 'downloads', 'doctor', 'help']);
@@ -70,6 +71,7 @@ const FLAG_SPECS = {
   backend: { name: 'backend', type: 'string', desc: '下载后端：auto（默认，有 qBittorrent 就用它）| builtin | qbittorrent' },
   'qb-url': { name: 'qbUrl', type: 'string', desc: 'qBittorrent WebUI 地址，如 http://127.0.0.1:8080|admin|密码' },
   'no-resume': { name: 'noResume', type: 'boolean', desc: 'serve：启动时不自动续传未完成的任务' },
+  'no-covers': { name: 'noCovers', type: 'boolean', desc: 'serve：关闭封面查询（不向 Jikan / iTunes 发送任何标题）' },
   help: { name: 'help', type: 'boolean', short: 'h', desc: '显示帮助' },
   version: { name: 'version', type: 'boolean', short: 'V', desc: '显示版本' },
 };
@@ -304,6 +306,12 @@ async function runServe(positionals, options, color) {
     host,
     http: ctx.http,
     cache: ctx.cache,
+    coverFinder: createCoverFinder({
+      http: ctx.http,
+      cache: ctx.cache,
+      enabled: options.noCovers !== true,
+      logger: ctx.logger,
+    }),
     version: VERSION,
     logger: ctx.logger,
     downloadManager,

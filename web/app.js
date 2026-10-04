@@ -22,6 +22,7 @@ const LS_KEYS = {
   order: LS_PREFIX + 'order',
   pageSize: LS_PREFIX + 'pageSize',
   filters: LS_PREFIX + 'filters',
+  covers: LS_PREFIX + 'covers',
 };
 
 const SORT_VALUES = ['relevance', 'seeders', 'leechers', 'size', 'date'];
@@ -77,6 +78,12 @@ const state = {
   lastResults: [],
   controller: null,
   seq: 0,
+  // 封面：默认开启（关掉后不向任何第三方发送标题）
+  coversEnabled: true,
+  coverObserver: null,
+  coverPending: new Set(),
+  coverTimer: null,
+  coverSeq: 0,
   downloads: {
     open: false,
     loaded: false, // 首次展开面板时才拉列表
@@ -405,8 +412,12 @@ function restorePrefs() {
   const pageSize = asNumber(lsGet(LS_KEYS.pageSize));
   if (pageSize !== null && PAGE_SIZES.indexOf(pageSize) >= 0) state.pageSize = pageSize;
 
+  // 封面偏好：只有显式存过 "0" 才关闭（默认开启）
+  state.coversEnabled = lsGet(LS_KEYS.covers) !== '0';
+
   if (dom.sort) dom.sort.value = state.sort;
   if (dom.pageSize) dom.pageSize.value = String(state.pageSize);
+  if (dom.covers) dom.covers.checked = state.coversEnabled;
 
   state.filters = restoreFilters();
   writeFilterInputs(state.filters);
@@ -900,14 +911,211 @@ function renderResults(data, query) {
   renderPagination(page, totalPages);
 }
 
+/** 每次重渲染自增：分块插入时用它丢弃已过期的任务（避免旧结果插到新列表里）。 */
+let renderGeneration = 0;
+/** 每块插入的行数：首块立即渲染，其余分帧补上。 */
+const ROW_CHUNK_SIZE = 24;
+
+/** 把回调排到空闲时间（不支持 requestIdleCallback 时退化为下一帧）。 */
+function scheduleIdle(callback) {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(callback, { timeout: 200 });
+    return;
+  }
+  window.setTimeout(callback, 16);
+}
+
 function renderRows() {
   if (!dom.resultsBody) return;
+  const generation = ++renderGeneration;
   const keywords = keywordsOf(state.query);
   // 排序完全由后端全局完成，这里保持响应顺序
   const list = Array.isArray(state.lastResults) ? state.lastResults.slice() : [];
   clear(dom.resultsBody);
+  resetCoverWork();
 
-  for (const item of list) {
+  // 先把行建好再插入。脱离文档的节点不触发布局，构建本身很便宜；
+  // 真正的开销在插入时的布局：一次性插入 100 行实测要 ~200ms（肉眼一顿），
+  // 所以首块立即插入、其余分帧补上——首屏只付第一块的代价。
+  const rows = list.map((item) => buildResultRow(item, keywords));
+
+  const insertChunk = (start) => {
+    if (generation !== renderGeneration) return; // 期间又渲染过一次，丢弃这批
+    const end = Math.min(start + ROW_CHUNK_SIZE, rows.length);
+    const chunk = rows.slice(start, end);
+    const fragment = document.createDocumentFragment();
+    for (const row of chunk) fragment.appendChild(row);
+    dom.resultsBody.appendChild(fragment);
+    // 注意：appendChild(fragment) 会把 fragment 搬空，所以这里必须用行元素数组，
+    // 不能拿 fragment 去 querySelectorAll（那样永远查不到，封面也就永远不加载）。
+    observeCovers(chunk);
+    if (end < rows.length) scheduleIdle(() => insertChunk(end));
+  };
+
+  insertChunk(0);
+
+  if (state.query) dom.resultsTable.setAttribute('aria-label', '“' + state.query + '”的搜索结果');
+}
+
+/* ------------------------------------------------------------------ */
+/* 封面：只对进入视口的行查询，且批量、串行、可中断                      */
+/* ------------------------------------------------------------------ */
+
+/** 一次最多查多少个标题（服务端上限是 24）。
+ *  取小值是为了**渐进出现**：一次查 24 个要等全部完成才返回，封面会迟迟不露面。 */
+const MAX_COVER_BATCH = 6;
+
+/** 取片名的首个字母/汉字，用作无封面时的占位。 */
+function initialOf(title) {
+  const match = String(title).match(/[\p{L}\p{N}]/u);
+  return match ? match[0].toUpperCase() : '?';
+}
+
+/** 重渲染前清掉封面相关的在途状态（旧行已从 DOM 移除）。 */
+function resetCoverWork() {
+  state.coverSeq += 1;
+  if (state.coverTimer !== null) {
+    window.clearTimeout(state.coverTimer);
+    state.coverTimer = null;
+  }
+  if (state.coverObserver) {
+    state.coverObserver.disconnect();
+    state.coverObserver = null;
+  }
+  state.coverPending = new Map();
+}
+
+/** 用户关掉封面开关时调用：停止一切在途查询。 */
+function cancelCoverWork() {
+  resetCoverWork();
+}
+
+/**
+ * 观察这一批行里的封面占位块：进入视口才加入待查队列。
+ *
+ * 这样即使一页 100 行，也只会为真正看得到的行去查第三方，
+ * 既省请求也不会拖慢首屏。
+ *
+ * @param {Element[]} rows 已经插入文档的行元素
+ */
+function observeCovers(rows) {
+  if (!state.coversEnabled || rows.length === 0) return;
+
+  const targets = [];
+  for (const row of rows) {
+    const node = row.querySelector('.cover[data-cover-title]');
+    if (node) targets.push(node);
+  }
+  if (targets.length === 0) return;
+
+  if (typeof window.IntersectionObserver !== 'function') {
+    // 不支持就直接排队（老浏览器上功能优先）
+    for (const node of targets) enqueueCover(node);
+    return;
+  }
+
+  if (!state.coverObserver) {
+    state.coverObserver = new window.IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          state.coverObserver.unobserve(entry.target);
+          enqueueCover(entry.target);
+        }
+      },
+      // 提前 200px 开始查，滚到跟前时通常已经就绪
+      { rootMargin: '200px 0px' },
+    );
+  }
+  for (const node of targets) state.coverObserver.observe(node);
+}
+
+/** 把一行加入待查队列，并按批触发查询。 */
+function enqueueCover(node) {
+  if (!state.coversEnabled || node.dataset.coverDone === '1') return;
+  const title = node.dataset.coverTitle;
+  if (!title) return;
+  node.dataset.coverDone = '1';
+
+  let nodes = state.coverPending.get(title);
+  if (!nodes) {
+    nodes = new Set();
+    state.coverPending.set(title, nodes);
+  }
+  nodes.add(node);
+
+  if (state.coverTimer === null) {
+    state.coverTimer = window.setTimeout(() => {
+      state.coverTimer = null;
+      flushCovers();
+    }, 120);
+  }
+}
+
+/** 取一批待查标题，问服务端要封面地址，然后填到对应行上。 */
+async function flushCovers() {
+  if (!state.coversEnabled) return;
+  const batch = [...state.coverPending.keys()].slice(0, MAX_COVER_BATCH);
+  if (batch.length === 0) return;
+
+  const nodesByTitle = new Map();
+  for (const title of batch) {
+    nodesByTitle.set(title, state.coverPending.get(title));
+    state.coverPending.delete(title);
+  }
+
+  const seq = state.coverSeq;
+  const params = new URLSearchParams();
+  for (const title of batch) params.append('title', title);
+
+  try {
+    const response = await fetch('/api/covers?' + params.toString(), { headers: { accept: 'application/json' } });
+    if (!response.ok) return;
+    const data = await response.json();
+    // 期间重渲染过、或用户关掉了封面 → 丢弃这批结果
+    if (seq !== state.coverSeq || !state.coversEnabled) return;
+
+    for (const item of data.covers ?? []) {
+      const nodes = nodesByTitle.get(item.title);
+      if (!nodes) continue;
+      for (const node of nodes) {
+        if (!node.isConnected) continue;
+        if (item.url) {
+          node.appendChild(
+            el('img', {
+              class: 'cover-img',
+              attrs: { src: item.url, alt: '', decoding: 'async', loading: 'lazy' },
+            }),
+          );
+          if (item.pageUrl) node.setAttribute('title', '封面来自 ' + (item.provider ?? '第三方'));
+        } else {
+          node.classList.add('cover-empty');
+        }
+      }
+    }
+  } catch {
+    /* 网络问题就静默放弃：封面只是锦上添花，不该影响主流程 */
+  } finally {
+    if (state.coverPending.size > 0) {
+      if (state.coverTimer === null) {
+        state.coverTimer = window.setTimeout(() => {
+          state.coverTimer = null;
+          flushCovers();
+        }, 120);
+      }
+    }
+  }
+}
+
+/**
+ * 建一行结果。
+ *
+ * @param {object} item 一条搜索结果
+ * @param {string[]} keywords 用于高亮的关键词
+ * @returns {HTMLTableRowElement}
+ */
+function buildResultRow(item, keywords) {
+  {
     const title = asString(item.title) || '(无标题)';
     const detailsUrl = asString(item.detailsUrl);
     const torrentUrl = asString(item.torrentUrl);
@@ -918,12 +1126,23 @@ function renderRows() {
 
     // 标题（关键词高亮：文本节点分割 + <mark>）
     const titleCell = el('td', { class: 'cell-title', dataset: { label: '标题' } });
+    if (state.coversEnabled) {
+      // 占位块先占好位置（固定尺寸），封面到了再塞 <img>，避免加载时抖动。
+      // 没有封面时这个块显示片名首字，所以也不会出现空洞。
+      titleCell.appendChild(
+        el('span', {
+          class: 'cover',
+          dataset: { coverTitle: title, initial: initialOf(title) },
+          attrs: { 'aria-hidden': 'true' },
+        }),
+      );
+    }
     const titleNode = detailsUrl
       ? el('a', {
           class: 'title-link',
-          attrs: { href: detailsUrl, target: '_blank', rel: 'noopener noreferrer', title: '打开详情页' },
+          attrs: { href: detailsUrl, target: '_blank', rel: 'noopener noreferrer', title: title },
         })
-      : el('span', { class: 'title-link' });
+      : el('span', { class: 'title-link', attrs: { title: title } });
     highlightInto(titleNode, title, keywords);
     titleCell.appendChild(titleNode);
     if (infoHash) {
@@ -1065,10 +1284,8 @@ function renderRows() {
     actionsCell.appendChild(actions);
     tr.appendChild(actionsCell);
 
-    dom.resultsBody.appendChild(tr);
+    return tr;
   }
-
-  if (state.query) dom.resultsTable.setAttribute('aria-label', '“' + state.query + '”的搜索结果');
 }
 
 /** 结果摘要：总数 / 耗时 / 已过滤 N 条 / 缓存标记。 */
@@ -1852,6 +2069,16 @@ function bindEvents() {
     });
   }
 
+  // 封面开关：关掉后立刻停止一切第三方查询（不重新搜索，只重渲染当前结果）
+  if (dom.covers) {
+    dom.covers.addEventListener('change', () => {
+      state.coversEnabled = dom.covers.checked === true;
+      lsSet(LS_KEYS.covers, state.coversEnabled ? '1' : '0');
+      if (!state.coversEnabled) cancelCoverWork();
+      renderRows();
+    });
+  }
+
   // 重新抓取（跳过服务端缓存）
   if (dom.refreshBtn) {
     dom.refreshBtn.addEventListener('click', () => {
@@ -1903,6 +2130,7 @@ function cacheDom() {
   dom.minSeeders = $('min-seeders');
   dom.exclude = $('exclude');
   dom.safe = $('safe');
+  dom.covers = $('covers');
   dom.applyFilters = $('apply-filters');
   dom.resetFilters = $('reset-filters');
   dom.alertSlot = $('alert-slot');

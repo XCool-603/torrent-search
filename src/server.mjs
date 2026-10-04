@@ -54,6 +54,7 @@ export function createApiServer(options) {
   const startedAt = Date.now();
   const defaultTimeoutMs = options.defaultTimeoutMs ?? 8_000;
   const maxPageSize = options.maxPageSize ?? 100;
+const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见行分批请求）
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch((error) => {
@@ -105,6 +106,12 @@ export function createApiServer(options) {
       return;
     }
 
+    // 封面接口（GET 为主；图片走 /api/cover/<key>）
+    if (pathname === '/api/covers' || pathname.startsWith('/api/cover/')) {
+      await handleCoversApi(req, res, url, pathname);
+      return;
+    }
+
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       sendJson(res, 405, { error: { code: 'method_not_allowed', message: '只支持 GET' } });
       return;
@@ -118,6 +125,7 @@ export function createApiServer(options) {
           uptimeSec: Math.round((Date.now() - startedAt) / 1000),
           node: process.version,
           proxy: options.http?.proxy ? String(options.http.proxy.href) : null,
+          covers: { enabled: options.coverFinder ? options.coverFinder.enabled === true : false },
           downloads: options.downloadManager
             ? {
                 enabled: true,
@@ -145,6 +153,76 @@ export function createApiServer(options) {
         sendJson(res, 404, { error: { code: 'not_found', message: `未知接口：${pathname}` } });
       }
     }
+  }
+
+  /**
+   * 封面接口：
+   *   GET /api/covers?title=..&title=..   批量查封面（最多 24 个标题），返回同源图片地址
+   *   GET /api/cover/<key>                取封面图片字节（仅限缓存里已有的 key）
+   *
+   * 安全要点：`/api/cover/<key>` **只服务缓存中已存在的 key**，不接受任意 URL，
+   * 否则这个接口就变成了一个任意请求代理（SSRF）。
+   */
+  async function handleCoversApi(req, res, url, pathname) {
+    const finder = options.coverFinder;
+
+    if (pathname === '/api/covers') {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        sendJson(res, 405, { error: { code: 'method_not_allowed', message: '只支持 GET' } });
+        return;
+      }
+      if (!finder || finder.enabled !== true) {
+        sendJson(res, 200, { enabled: false, covers: [] });
+        return;
+      }
+
+      const titles = url.searchParams.getAll('title').slice(0, MAX_COVER_TITLES);
+      const covers = [];
+      for (const title of titles) {
+        if (typeof title !== 'string' || title.trim() === '') continue;
+        let hit = null;
+        try {
+          hit = await finder.lookup(title);
+        } catch (error) {
+          logger(`封面查询失败：${error?.message ?? error}`);
+        }
+        covers.push(
+          hit
+            ? {
+                title,
+                url: `/api/cover/${hit.key}`,
+                provider: hit.provider,
+                matchedTitle: hit.matchedTitle ?? null,
+                pageUrl: hit.pageUrl ?? null,
+              }
+            : { title, url: null, provider: null, matchedTitle: null, pageUrl: null },
+        );
+      }
+      sendJson(res, 200, { enabled: true, covers });
+      return;
+    }
+
+    // /api/cover/<key>
+    const key = pathname.slice('/api/cover/'.length);
+    if (!finder || finder.enabled !== true) {
+      sendJson(res, 404, { error: { code: 'covers_disabled', message: '封面功能未启用' } });
+      return;
+    }
+
+    const image = await finder.image(key).catch(() => null);
+    if (!image) {
+      sendJson(res, 404, { error: { code: 'not_found', message: '没有这张封面' } });
+      return;
+    }
+
+    res.writeHead(200, {
+      'content-type': image.contentType,
+      'content-length': image.body.length,
+      // 图片内容按 URL 固定（key 是标题哈希），可以长时间缓存
+      'cache-control': 'public, max-age=604800, immutable',
+      'x-content-type-options': 'nosniff',
+    });
+    res.end(req.method === 'HEAD' ? undefined : image.body);
   }
 
   /**

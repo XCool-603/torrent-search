@@ -548,6 +548,44 @@ mark {
   word-break: break-all;
 }
 
+/* 封面缩略图。
+   固定尺寸先占位、图片到了再填：既不会加载时抖动，也避免每行重排。
+   没有封面时这个块显示片名首字，所以不会出现空洞。 */
+.results-table .cover {
+  float: left;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 56px;
+  margin: 1px 10px 4px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--panel-3);
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 600;
+  overflow: hidden;
+  user-select: none;
+}
+
+.results-table .cover-empty::after { content: attr(data-initial); }
+
+.results-table .cover-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 标题最多两行：行高稳定（排版更省），悬停看完整标题 */
+.results-table .cell-title .title-link {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .nowrap { white-space: nowrap; }
 

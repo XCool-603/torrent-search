@@ -85,7 +85,8 @@ try {
         [
           'tools/screenshot.mjs',
           '--url',
-          `http://127.0.0.1:${PORT}/?q=ubuntu`,
+          // 用会出封面的关键词，这样截图能体现「图片 + 名称」的界面
+          `http://127.0.0.1:${PORT}/?q=${encodeURIComponent('进击的巨人')}`,
           '--out',
           shot.out,
           '--width',

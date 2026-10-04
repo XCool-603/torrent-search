@@ -198,6 +198,32 @@ Both scripts are verified without Docker by putting a stub `docker` (and `docker
 that logs its arguments and can simulate a failing health check; that covers deploy, upgrade,
 the dirty-tree refusal, the detached-HEAD path and the rollback.
 
+## Frontend performance and cover images
+
+Two things worth knowing before touching `web/`:
+
+**Rendering is chunked on purpose.** `renderRows()` builds rows detached, then inserts them in chunks of
+`ROW_CHUNK_SIZE` (first chunk immediately, the rest via `requestIdleCallback`). Inserting 100 rows in one
+go costs ~200ms of layout — a visible hitch. Keep the chunking, and keep per-row node count low.
+
+Measure before and after with `npm run perf` (CDP-based, zero dependencies). It reports script/style/layout
+time, long tasks and scroll frame rate, and separates render cost from network time. A regression shows up
+as a new long task (>50ms) or dropped frames.
+
+```bash
+npm run perf -- --url "http://127.0.0.1:8787/?q=ubuntu" --page-size 100
+```
+
+**Covers are server-side and lazy.** `src/covers.mjs` cleans a torrent title into a searchable name
+(`cleanTitle`), picks the most likely provider (`providersFor`), verifies the returned title actually
+matches (`titleMatches` — a wrong cover is worse than none), and caches both metadata and image bytes.
+The frontend only asks for rows that enter the viewport, in small batches, so a 100-row page never fires
+100 lookups. If you add a provider: it must be keyless and GET-only (the HTTP client sends no request body),
+and it needs tests for its parser plus a `matches()` heuristic.
+
+Two traps found the hard way: `appendChild(fragment)` empties the fragment, so query the inserted rows
+instead; and the batch response is all-or-nothing, so keep `MAX_COVER_BATCH` small for progressive display.
+
 ## The bundled AI-agent skill
 
 `skills/torrent-search/` is a **DSH skill**: `SKILL.md` (frontmatter `name` + routing `description`) plus a

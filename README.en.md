@@ -207,6 +207,51 @@ a per-source status bar (hover for failure reasons), keyword highlighting, one-c
 open magnet / download `.torrent`, a "re-fetch" that bypasses the server cache, and a responsive
 narrow-screen layout. It binds to the loopback address only — it is not exposed to the network.
 
+### Cover images (poster + name)
+
+Each result row carries a cover thumbnail; when there is no cover it shows the first character of the
+title, so there is never an empty hole and nothing shifts while images load.
+
+| Source | Covers | Notes |
+| --- | --- | --- |
+| [Kitsu](https://kitsu.io) | Anime | Needs a specific Accept header; weak on Simplified Chinese, so it falls through |
+| [TVmaze](https://www.tvmaze.com) | TV shows | Detected from `S01E05`-style markers |
+| [Wikipedia](https://www.wikipedia.org) | General fallback | Movies / books / games / manga; CJK titles use the zh site |
+
+**About privacy**: covers require a third party, and the only usable key is the title. So only the
+**cleaned title** is sent (`【…】进击的巨人 最终季 完结篇 后篇[简繁英字幕].Attack.on.Titan.S04…` → `进击的巨人`),
+never the magnet, info hash or anything else about you. Image bytes are fetched and cached by the server,
+so the browser only ever talks to its own origin.
+
+Turn it off if you prefer:
+
+- the "封面" switch in the UI (stored locally; when off, not a single request is made);
+- or disable it server-wide: `node bin/magnet-search.mjs serve --no-covers`.
+
+Matches are sanity-checked: fuzzy search really does turn `The Matrix` into `The Animatrix`, and
+**a wrong cover is worse than none**, so a mismatch counts as a miss.
+
+### Frontend performance
+
+Rendering was tuned for large pages (100 rows/page) and can be measured with `npm run perf`:
+
+```bash
+npm run perf -- --url "http://127.0.0.1:8787/?q=ubuntu" --page-size 100
+```
+
+It uses CDP to collect script/style/layout time, long tasks and scroll frame rate, separating render
+cost from network time. Current baseline (100 rows):
+
+| Metric | Before | Now |
+| --- | --- | --- |
+| Long tasks (>50ms) | 1 (52ms) | **0** |
+| Scroll frame rate | — | 16.2ms average / 0 dropped frames |
+| Typing 8 characters | — | 0ms of rendering (no re-render) |
+
+How: result rows are **inserted in chunks** (first chunk immediately, the rest across frames, avoiding the
+one-shot 100-row layout stall), rows keep their node count low, and covers are looked up **only for rows
+that enter the viewport**, applied progressively in small batches.
+
 ---
 
 ## JSON API
