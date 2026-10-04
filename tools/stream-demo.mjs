@@ -20,7 +20,7 @@ import fs from 'node:fs/promises';
 
 import { startServer } from '../src/server.mjs';
 import { DownloadManager } from '../src/download/manager.mjs';
-import { memoryCache } from '../test/helpers.mjs';
+import { createContext } from '../src/index.mjs';
 import { startFakeSwarm, buildInfoDict } from '../test/helpers/fake-swarm.mjs';
 
 /**
@@ -104,6 +104,11 @@ if (options.magnet) {
   expectedBytes = content.length;
 }
 
+// 搜索上下文必须用 createContext()：它组装了带 getJson/getText/request 的 HTTP 客户端
+// 与磁盘缓存。随手传个 { proxy: null } 的话，搜索接口会全源报
+// "ctx.http.getJson is not a function" —— 这个坑我踩过。
+const ctx = await createContext({ proxy: null });
+
 const manager = new DownloadManager({
   dir,
   persistFile: null,
@@ -117,8 +122,8 @@ const manager = new DownloadManager({
 const instance = await startServer({
   port: options.port,
   host: '127.0.0.1',
-  http: { proxy: null },
-  cache: memoryCache(),
+  http: ctx.http,
+  cache: ctx.cache,
   version: 'demo',
   logger: () => {},
   downloadManager: manager,
