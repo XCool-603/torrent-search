@@ -5,6 +5,7 @@
  *   GET /api/health              健康检查
  *   GET /api/sources             数据源列表
  *   GET /api/search?q=...        聚合搜索
+ *   GET /api/stream/<hash>[/<i>] 边下边播（文件清单 / 支持 Range 的字节流）
  *   GET /*                        web/ 目录下的静态文件（默认 index.html）
  *
  * 只监听 127.0.0.1（默认），不对外暴露；API 带 CORS 头，方便被别的本地页面调用。
@@ -12,10 +13,13 @@
 
 import http from 'node:http';
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { searchAll, SORT_MODES, SORT_ORDERS } from './aggregate.mjs';
 import { listSources } from './sources/index.mjs';
+import { parseRange, contentTypeFor, readReadyRange, DEFAULT_WAIT_MS, DEFAULT_CHUNK_BYTES } from './bt/stream.mjs';
+import { assertInside } from './bt/storage.mjs';
 
 const DEFAULT_WEB_DIR = fileURLToPath(new URL('../web/', import.meta.url));
 
@@ -95,7 +99,7 @@ const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见
     setCors(req, res, pathname);
 
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, { 'access-control-max-age': '86400', 'access-control-allow-methods': 'GET, OPTIONS', 'access-control-allow-headers': 'content-type' });
+      res.writeHead(204, { 'access-control-max-age': '86400', 'access-control-allow-methods': 'GET, OPTIONS', 'access-control-allow-headers': 'content-type, range' });
       res.end();
       return;
     }
@@ -109,6 +113,12 @@ const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见
     // 封面接口（GET 为主；图片走 /api/cover/<key>）
     if (pathname === '/api/covers' || pathname.startsWith('/api/cover/')) {
       await handleCoversApi(req, res, url, pathname);
+      return;
+    }
+
+    // 边下边播（GET / HEAD，支持 Range）
+    if (pathname === '/api/stream' || pathname.startsWith('/api/stream/')) {
+      await handleStreamApi(req, res, url, pathname);
       return;
     }
 
@@ -223,6 +233,222 @@ const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见
       'x-content-type-options': 'nosniff',
     });
     res.end(req.method === 'HEAD' ? undefined : image.body);
+  }
+
+  /**
+   * 边下边播接口：
+   *   GET /api/stream/<infoHash>              文件清单（含下标、路径、大小、类型）
+   *   GET /api/stream/<infoHash>/<fileIndex>  文件字节，支持 Range
+   *
+   * 只服务**已校验落盘**的分片：请求的数据还没到就等（默认最多 30 秒），
+   * 超时返回 503 让播放器稍后重试 —— 起播时等首片是正常的。
+   *
+   * 只支持内置引擎的任务：qBittorrent 后端的数据在 qB 侧，我们拿不到它的分片位图，
+   * 因此如实返回 409 说明原因，而不是返回读不出来的字节。
+   *
+   * 安全：只按 (infoHash, fileIndex) 定位**正在下载的任务**，不接受任意路径参数，
+   * 所以这个接口无法被用来读本机其它文件。
+   */
+  async function handleStreamApi(req, res, url, pathname) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      sendJson(res, 405, { error: { code: 'method_not_allowed', message: '只支持 GET' } });
+      return;
+    }
+
+    const manager = options.downloadManager;
+    if (!manager) {
+      sendJson(res, 503, { error: { code: 'downloads_disabled', message: '未启用下载功能' } });
+      return;
+    }
+
+    const rest = pathname.replace(/^\/api\/stream\/?/, '');
+    const [rawHash, rawIndex] = rest.split('/');
+    const infoHash = String(rawHash ?? '').toLowerCase();
+
+    if (!/^[0-9a-f]{40}$/.test(infoHash)) {
+      sendJson(res, 400, { error: { code: 'bad_info_hash', message: 'info hash 必须是 40 位十六进制' } });
+      return;
+    }
+
+    const task = manager.internalByInfoHash(infoHash);
+    if (!task) {
+      sendJson(res, 404, { error: { code: 'task_not_found', message: '没有这个 info hash 的下载任务' } });
+      return;
+    }
+
+    const session = task.session;
+    const finishedOnDisk = !session && task.status === 'done' && Array.isArray(task.files) && task.files.length > 0;
+
+    if (!session && !finishedOnDisk) {
+      sendJson(res, 409, {
+        error: {
+          code: 'not_streamable',
+          message:
+            task.backend === 'qbittorrent'
+              ? '该任务由 qBittorrent 下载，无法边下边播（数据在 qBittorrent 侧，取不到分片位图）'
+              : '该任务当前不可播放：下载尚未进入分片阶段，或已失败/取消',
+        },
+      });
+      return;
+    }
+
+    // 两种数据来源：
+    //   下载中 → 会话（torrent 元数据 + 已校验分片位图 + 读盘句柄），只给已就绪的字节
+    //   已下完 → 磁盘文件（此时引擎已关闭会话，文件本身是完整且校验过的）
+    const torrent = session?.torrent ?? null;
+    const fileCount = torrent ? torrent.files.length : task.files.length;
+    const fileAt = (index) => (torrent ? torrent.files[index] : task.files[index]);
+
+    // 不带下标：返回文件清单，方便调用方决定播哪一个
+    if (rawIndex === undefined || rawIndex === '') {
+      sendJson(res, 200, {
+        infoHash,
+        name: task.name ?? torrent?.name ?? null,
+        totalBytes: torrent?.totalSize ?? task.totalBytes ?? null,
+        pieceLength: torrent?.pieceLength ?? null,
+        pieceCount: torrent?.pieceCount ?? task.pieceCount ?? null,
+        piecesDone: session ? session.done.filter(Boolean).length : (task.pieceCount ?? 0),
+        complete: Boolean(finishedOnDisk) || (session ? session.done.every(Boolean) : false),
+        files: Array.from({ length: fileCount }, (_, index) => {
+          const file = fileAt(index);
+          return {
+            index,
+            path: file.path,
+            length: file.length,
+            contentType: contentTypeFor(file.path),
+            url: `/api/stream/${infoHash}/${index}`,
+          };
+        }),
+      });
+      return;
+    }
+
+    const fileIndex = Number(rawIndex);
+    if (!Number.isInteger(fileIndex) || fileIndex < 0 || fileIndex >= fileCount) {
+      sendJson(res, 404, { error: { code: 'file_not_found', message: `文件下标不存在：${rawIndex}` } });
+      return;
+    }
+
+    const file = fileAt(fileIndex);
+
+    /** 流式响应共用的头。跨源播放器要能读到这几个头才能正确 seek / 判断总长。 */
+    const streamHeaders = () => ({
+      'content-type': contentTypeFor(file.path),
+      'accept-ranges': 'bytes',
+      'cache-control': 'no-store',
+      'access-control-expose-headers': 'content-range, accept-ranges, content-length',
+    });
+
+    // ---- 已下完：文件在磁盘上完整且校验过，直接按 Range 读文件流 ----
+    // 比读进内存更省，也解决了「引擎已关闭会话、句柄不可用」的问题。
+    if (finishedOnDisk) {
+      const absolute = path.resolve(task.dir, file.path);
+      assertInside(task.dir, absolute);
+
+      let stat;
+      try {
+        stat = await fs.stat(absolute);
+      } catch {
+        sendJson(res, 404, { error: { code: 'file_missing', message: `文件不在磁盘上：${file.path}` } });
+        return;
+      }
+
+      const diskSize = stat.size;
+      if (diskSize === 0) {
+        res.writeHead(200, { ...streamHeaders(), 'content-length': '0' });
+        res.end();
+        return;
+      }
+
+      const diskRange = parseRange(req.headers.range, diskSize);
+      if (diskRange?.unsatisfiable) {
+        res.writeHead(416, { ...streamHeaders(), 'content-range': `bytes */${diskSize}` });
+        res.end();
+        return;
+      }
+
+      const diskPartial = Boolean(diskRange && !diskRange.unsupported);
+      const diskStart = diskPartial ? diskRange.start : 0;
+      const diskEnd = diskPartial ? diskRange.end : diskSize - 1;
+      const diskHeaders = { ...streamHeaders(), 'content-length': String(diskEnd - diskStart + 1) };
+      if (diskPartial) diskHeaders['content-range'] = `bytes ${diskStart}-${diskEnd}/${diskSize}`;
+
+      res.writeHead(diskPartial ? 206 : 200, diskHeaders);
+      if (req.method === 'HEAD') {
+        res.end();
+        return;
+      }
+      createReadStream(absolute, { start: diskStart, end: diskEnd }).pipe(res);
+      return;
+    }
+
+    // ---- 下载中：只给「已校验且连续」的字节 ----
+    const size = file.length;
+
+    if (size === 0) {
+      res.writeHead(200, { ...streamHeaders(), 'content-length': '0' });
+      res.end();
+      return;
+    }
+
+    const range = parseRange(req.headers.range, size);
+    if (range?.unsatisfiable) {
+      res.writeHead(416, { ...streamHeaders(), 'content-range': `bytes */${size}` });
+      res.end();
+      return;
+    }
+
+    const partial = Boolean(range && !range.unsupported);
+    const start = partial ? range.start : 0;
+    const end = partial ? range.end : size - 1;
+    const wanted = end - start + 1;
+    const maxChunk = options.streamChunkBytes ?? DEFAULT_CHUNK_BYTES;
+
+    // HEAD 只回头部，不去等数据：播放器/探针常先发 HEAD，让它等 30 秒是错的
+    if (req.method === 'HEAD') {
+      const headers = { ...streamHeaders(), 'content-length': String(wanted) };
+      if (partial) headers['content-range'] = `bytes ${start}-${end}/${size}`;
+      res.writeHead(partial ? 206 : 200, headers);
+      res.end();
+      return;
+    }
+
+    // 客户端断开时立刻停止等待，别把 30 秒的等待留在后台
+    const controller = new AbortController();
+    const onClose = () => controller.abort();
+    res.on('close', onClose);
+
+    let result;
+    try {
+      result = await readReadyRange({
+        session,
+        fileIndex,
+        offset: start,
+        // 不一次等完整段：浏览器常发 bytes=0-（整个文件），等整段会白等且吃内存
+        maxLength: Math.min(wanted, maxChunk),
+        timeoutMs: options.streamWaitMs ?? DEFAULT_WAIT_MS,
+        // 下载结束/失败后 session 会被清掉：此时再等也没有意义，立刻放弃
+        isAlive: () => task.session === session,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (res.headersSent || res.writableEnded) return;
+      sendJson(res, 503, {
+        error: { code: 'data_not_ready', message: error?.message ?? String(error) },
+      });
+      return;
+    } finally {
+      res.off('close', onClose);
+    }
+
+    const buffer = result.buffer;
+    const headers = { ...streamHeaders(), 'content-length': String(buffer.length) };
+    // 如实告知本次实际返回的范围（可能少于请求的范围，播放器会继续请求后续）
+    if (partial || buffer.length < wanted) {
+      headers['content-range'] = `bytes ${start}-${start + buffer.length - 1}/${size}`;
+    }
+    res.writeHead(partial ? 206 : 200, headers);
+    res.end(buffer);
   }
 
   /**

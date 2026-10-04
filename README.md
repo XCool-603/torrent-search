@@ -331,7 +331,35 @@ npm run perf -- --url "http://127.0.0.1:8787/?q=ubuntu" --page-size 100
   - `GET /api/downloads` — 任务列表（含 `dir`、`backend`、`qbit:{ok,version}`）
   - `GET /api/downloads/:id` — 单个任务；`DELETE /api/downloads/:id?deleteFiles=1` — 取消并删除
   - `GET /api/downloads/stream` — SSE 实时进度
+- 边下边播（`<video>` 可直接播）：
+  - `GET /api/stream/<infoHash>` — 文件清单：`{infoHash, name, totalBytes, pieceLength, pieceCount,
+    piecesDone, complete, files:[{index, path, length, contentType, url}]}`
+  - `GET /api/stream/<infoHash>/<fileIndex>` — 文件字节，支持 `Range`（206 + `Content-Range`），
+    无 `Range` 时返回 200；`HEAD` 只回头部不等数据；越界范围返回 416
 - 错误统一为 `{"error":{"code":"bad_request","message":"..."}}`
+
+#### 边下边播怎么工作
+
+只服务**已校验落盘**的分片 —— 磁盘上的文件是按种子长度预分配的，看文件大小判断不出数据是否有效，
+唯一可信的判据是分片位图（分片 SHA1 校验通过后才置位）。
+
+请求的数据还没到时接口会**等**（默认最多 30 秒），所以「刚加完任务就点播放」也能起播；
+超时返回 `503 data_not_ready`，播放器稍后重试即可。
+
+浏览器常发 `Range: bytes=0-`（整个文件）。下载中的任务不会等整段就绪、也不把整个文件读进内存，
+而是返回**当前已就绪的连续区间**（单次上限 8 MiB），`Content-Range` 里如实告知实际范围，
+播放器会据此继续请求后续。
+
+| 任务状态 | 数据来源 | 说明 |
+|---|---|---|
+| 下载中 | 引擎会话（已校验分片） | 边下边播，数据没到就等 |
+| 已下完 | 磁盘文件流 | 直接按 `Range` 读文件，最省内存 |
+| qBittorrent 后端 | — | 返回 `409`：数据在 qB 侧，取不到分片位图 |
+| 已停止/失败 | — | 返回 `409`：分片位图已随会话释放 |
+
+已知限制：**多文件种子里目标文件不在开头时，起播要等前面的分片下完**。
+引擎按分片序号从小到大下载（对单文件种子天然就是顺序下载），暂不支持"优先下载某个文件"。
+
 
 ### 作为库使用
 

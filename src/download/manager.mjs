@@ -172,6 +172,24 @@ export class DownloadManager extends EventEmitter {
   }
 
   /**
+   * 按 info hash 取**内部任务对象**（不是快照）。
+   *
+   * 流式播放需要 `task.session`（引擎内部的文件表与读盘句柄），而它按设计不出现在
+   * snapshot 里（snapshot 要能安全 JSON 序列化）。用 info hash 而不是任务 id 定位，
+   * 因为磁力链里本来就有 hash，播放地址不必依赖任务 id。
+   *
+   * @param {string} infoHash
+   * @returns {any|null}
+   */
+  internalByInfoHash(infoHash) {
+    const target = String(infoHash ?? '').toLowerCase();
+    for (const task of this.tasks.values()) {
+      if (task.infoHash === target) return task;
+    }
+    return null;
+  }
+
+  /**
    * 校验任务目录：必须位于默认下载目录之内（或就是它本身）。
    *
    * 安全考虑：/api/downloads 的 dir 参数来自请求体。若允许任意路径，
@@ -305,6 +323,9 @@ export class DownloadManager extends EventEmitter {
         clearInterval(task.qbitTimer);
         task.qbitTimer = null;
       }
+      // 引擎结束时 storage 已关闭，会话里的句柄不再可用 —— 必须清掉，
+      // 否则流式接口会拿着失效句柄去读盘。
+      task.session = null;
       task.finishedAt = Date.now();
       task.controller = null;
       this.emit('update', this.snapshot(task));
@@ -344,6 +365,12 @@ export class DownloadManager extends EventEmitter {
           this.emit('update', this.snapshot(task));
         }
         this.emit('progress', this.snapshot(task));
+      },
+      // 会话只在下载期间有效（引擎结束时 storage 会关闭），所以这里挂在任务上，
+      // 由 run() 的 finally 清掉。snapshot() 是白名单式的，不会把它序列化出去。
+      onSession: (session) => {
+        task.session = session;
+        task.files = session.torrent.files.map((file) => ({ path: file.path, length: file.length }));
       },
     });
 

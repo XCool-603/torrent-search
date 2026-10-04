@@ -140,6 +140,33 @@ export class TorrentStorage {
   }
 
   /**
+   * 读取文件内的一段字节（流式播放用）。
+   *
+   * **不做校验**：调用方必须先用 piecesForFileRange + 分片位图确认覆盖这段字节的
+   * 分片都已校验通过，否则读到的是预分配出来的空洞或写了一半的数据。
+   * 一次 read 可能短读，所以这里循环补满。
+   *
+   * @param {number} fileIndex
+   * @param {number} offset 文件内偏移
+   * @param {number} length
+   * @returns {Promise<Buffer>} 实际读到的字节（文件比预期短时可能不足 length）
+   */
+  async readFileRange(fileIndex, offset, length) {
+    const handle = this.handles.get(fileIndex);
+    if (!handle) throw new Error(`文件句柄未打开：${fileIndex}`);
+
+    const buffer = Buffer.alloc(length);
+    let filled = 0;
+    while (filled < length) {
+      const { bytesRead } = await handle.read(buffer, filled, length - filled, offset + filled);
+      if (bytesRead === 0) break;
+      filled += bytesRead;
+    }
+
+    return filled === length ? buffer : buffer.subarray(0, filled);
+  }
+
+  /**
    * 关闭所有句柄。
    */
   async close() {

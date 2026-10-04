@@ -64,6 +64,11 @@ export function generatePeerId() {
  *   useDht?: boolean,              // 是否在 tracker 失败时回退 DHT（默认 true）
  *   logger?: (msg: string) => void,
  *   onProgress?: (progress: any) => void,
+ *   onSession?: (session: { torrent: any, storage: any, done: boolean[] }) => void,
+ *                               // 元数据就绪、即将开始下载分片时回调一次，交出运行中的
+ *                               // 会话（文件表 + 读盘句柄 + 已校验分片位图）。
+ *                               // 流式播放靠它只读「已校验」的字节；下载结束时 storage 会关闭，
+ *                               // 所以会话只在下载期间有效。
  *   signal?: AbortSignal,
  *   metadataOnly?: boolean,     // 只解析元数据，不下载内容
  * }} options
@@ -198,6 +203,7 @@ export async function download(options) {
       logger,
       state,
       onProgress: emitProgress,
+      onSession: options.onSession,
     });
 
     await peerPool.close();
@@ -349,7 +355,7 @@ async function resolveMetadata(params) {
  * @param {any} params
  */
 async function downloadAllPieces(params) {
-  const { torrent, storage, existingSizes, peerPool, concurrency, timeoutMs, maxBytes, signal, logger, state, onProgress } = params;
+  const { torrent, storage, existingSizes, peerPool, concurrency, timeoutMs, maxBytes, signal, logger, state, onProgress, onSession } = params;
 
   const total = torrent.pieceCount;
   const done = new Array(total).fill(false);
@@ -358,6 +364,12 @@ async function downloadAllPieces(params) {
   let completed = false;
   let stoppedByLimit = false;
   let failureStreak = 0;
+
+  // 把「运行中的会话」交给调用方：torrent（文件表与分片长度）、storage（读盘）、
+  // done（已校验分片位图）这三样只存在于引擎内部，而流式播放必须拿到它们
+  // 才能只把「已就绪」的字节喂给播放器。这里在 worker 启动前调用，
+  // 所以整个下载期间该会话都是有效的。
+  onSession?.({ torrent, storage, done });
 
   // 断点续传：对已有数据做**真实的分片哈希校验**。
   // 不能按"文件大小够了就跳过"来粗判——预分配出来的稀疏文件大小也是满的，会被误判成已下完。

@@ -142,6 +142,35 @@ export function pieceToFileRanges(torrent, index) {
 }
 
 /**
+ * 文件内的一段字节覆盖哪些分片。
+ *
+ * 流式播放靠它判断「要播的这段数据到了没有」：只有覆盖该段的全部分片都校验通过，
+ * 磁盘上这段字节才是可信的（storage 会预分配文件，看文件大小判断不出数据是否有效）。
+ *
+ * @param {TorrentInfo} torrent
+ * @param {number} fileIndex
+ * @param {number} offset 文件内偏移
+ * @param {number} length
+ * @returns {{first: number, last: number}} 闭区间
+ */
+export function piecesForFileRange(torrent, fileIndex, offset, length) {
+  const file = torrent.files[fileIndex];
+  if (!file) throw new Error(`文件下标越界：${fileIndex}`);
+  if (!Number.isFinite(offset) || offset < 0) throw new Error(`偏移非法：${offset}`);
+  if (!Number.isFinite(length) || length <= 0) throw new Error(`长度非法：${length}`);
+  if (offset + length > file.length) {
+    throw new Error(`请求范围超出文件：offset=${offset} length=${length} 文件大小=${file.length}`);
+  }
+
+  const start = file.offset + offset;
+  const end = start + length - 1;
+  return {
+    first: Math.floor(start / torrent.pieceLength),
+    last: Math.floor(end / torrent.pieceLength),
+  };
+}
+
+/**
  * 分片下载时切块（默认 16 KiB，BEP 3 的常见上限）。
  *
  * @param {TorrentInfo} torrent
