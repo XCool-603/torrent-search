@@ -234,6 +234,12 @@ export async function readReadyRange(params) {
 /**
  * 可被 abort 打断的延时。
  *
+ * **刻意不 unref**：调用方（`waitForPiece` 的轮询、`readReadyRange`）就是在等这段时间，
+ * 若 unref，当事件循环里只剩这一个定时器时进程会直接退出，等待中的 Promise 永远不 resolve。
+ * Node 20/22 上表现为测试报 `Promise resolution is still pending but the event loop has
+ * already resolved`；线上则是一个正在等分片的播放请求被静默丢弃。
+ * （限速器、任务管理器都踩过同一族问题。）
+ *
  * @param {number} ms
  * @param {AbortSignal} [signal]
  */
@@ -248,7 +254,6 @@ function delay(ms, signal) {
       signal?.removeEventListener('abort', onAbort);
       resolve();
     }, ms);
-    timer.unref?.();
 
     function onAbort() {
       clearTimeout(timer);

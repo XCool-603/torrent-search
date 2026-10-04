@@ -17,6 +17,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { startServer } from '../src/server.mjs';
 import { DownloadManager } from '../src/download/manager.mjs';
@@ -25,6 +28,9 @@ import { parseInfoDict, piecesForFileRange } from '../src/bt/torrent.mjs';
 import { decodeAll, infoHashOf } from '../src/bt/bencode.mjs';
 import { memoryCache } from './helpers.mjs';
 import { startFakeSwarm, buildInfoDict } from './helpers/fake-swarm.mjs';
+
+const execFileAsync = promisify(execFile);
+const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * 造一个「可预测内容」的缓冲区：每个字节等于其下标对 251 取模。
@@ -174,6 +180,49 @@ test('readReadyRange：等首片就绪后才返回，且只返回已就绪的连
 
   assert.ok(waitedMs >= 150, `应当等待首片就绪，实际只等了 ${waitedMs}ms`);
   assert.deepEqual(buffer, content.subarray(0, 100));
+});
+
+test('readReadyRange：等待分片时必须保住事件循环（轮询定时器不能 unref）', async () => {
+  // 为什么用子进程：这个 bug 只在「事件循环里没有其它 ref 句柄」时暴露。
+  // 在测试进程里跑，runner 自己的句柄会一直保活，unref 与否看不出区别
+  // （Node 24 上就是这样：同一个 bug 在 20/22 上失败、24 上通过）。
+  //
+  // 子进程里刻意让「让分片就绪」的定时器也 unref，于是能否活到分片就绪
+  // 完全取决于 readReadyRange 的轮询定时器是否 ref：
+  //   修好 → 输出 OK；被 unref → 进程提前退出，什么都不输出。
+  const base = pathToFileURL(path.join(ROOT_DIR, 'src')).href;
+  const helpers = pathToFileURL(path.join(ROOT_DIR, 'test', 'helpers', 'fake-swarm.mjs')).href;
+
+  const script = `
+import { readReadyRange } from '${base}/bt/stream.mjs';
+import { parseInfoDict } from '${base}/bt/torrent.mjs';
+import { decodeAll, infoHashOf } from '${base}/bt/bencode.mjs';
+import { buildInfoDict } from '${helpers}';
+
+const content = Buffer.alloc(40_000, 9);
+const infoBytes = buildInfoDict({ name: 'ep.mp4', pieceLength: 16_384, content });
+const torrent = parseInfoDict(decodeAll(infoBytes), infoHashOf(infoBytes));
+const done = new Array(torrent.pieceCount).fill(false);
+const session = {
+  torrent,
+  done,
+  storage: { readFileRange: async (fileIndex, offset, length) => content.subarray(offset, offset + length) },
+};
+
+// 故意 unref：分片就绪这件事不该成为"进程存活"的来源
+const flip = setTimeout(() => { done[0] = true; }, 150);
+flip.unref();
+
+const { buffer } = await readReadyRange({ session, fileIndex: 0, offset: 0, maxLength: 64, pollMs: 20, timeoutMs: 4000 });
+process.stdout.write('OK ' + buffer.length);
+`;
+
+  const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '-e', script], {
+    timeout: 20_000,
+    windowsHide: true,
+  });
+
+  assert.match(stdout, /^OK 64$/, `子进程应等到分片就绪并读出 64 字节，实际输出：${JSON.stringify(stdout)}`);
 });
 
 test('readReadyRange：浏览器发 bytes=0-（整文件）时不会返回整文件，只给已就绪的连续段', async () => {
