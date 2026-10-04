@@ -411,7 +411,7 @@ cd torrent-search
 
 ```bash
 sh scripts/docker.sh upgrade              # pull latest main → rebuild → restart → health check
-sh scripts/docker.sh upgrade --ref v1.1.0 # move to a specific tag or branch (also works for rollback)
+sh scripts/docker.sh upgrade --ref v1.2.0 # move to a specific tag or branch (also works for rollback)
 sh scripts/docker.sh upgrade --no-cache   # skip the build cache
 ```
 
@@ -419,7 +419,7 @@ Windows:
 
 ```powershell
 .\scripts\docker.ps1 upgrade
-.\scripts\docker.ps1 upgrade --ref v1.1.0
+.\scripts\docker.ps1 upgrade --ref v1.2.0
 ```
 
 The upgrade script is safe to run because it:
@@ -458,7 +458,7 @@ not git or Node on the server:
 
 ```bash
 node tools/remote-deploy.mjs deploy  --host user@server --dir /opt/torrent-search
-node tools/remote-deploy.mjs upgrade --host user@server --ref v1.1.0   # upgrade / pin a version
+node tools/remote-deploy.mjs upgrade --host user@server --ref v1.2.0   # upgrade / pin a version
 node tools/remote-deploy.mjs status  --host user@server
 node tools/remote-deploy.mjs logs    --host user@server
 node tools/remote-deploy.mjs doctor  --host user@server                # diagnose inside the container

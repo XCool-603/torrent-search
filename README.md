@@ -426,7 +426,7 @@ cd torrent-search
 
 ```bash
 sh scripts/docker.sh upgrade              # 拉取最新 main → 重建镜像 → 重启 → 健康检查
-sh scripts/docker.sh upgrade --ref v1.1.0 # 升级/回退到指定版本（tag 或分支）
+sh scripts/docker.sh upgrade --ref v1.2.0 # 升级/回退到指定版本（tag 或分支）
 sh scripts/docker.sh upgrade --no-cache   # 不用构建缓存
 ```
 
@@ -434,7 +434,7 @@ Windows：
 
 ```powershell
 .\scripts\docker.ps1 upgrade
-.\scripts\docker.ps1 upgrade --ref v1.1.0
+.\scripts\docker.ps1 upgrade --ref v1.2.0
 ```
 
 升级脚本做了这些事，所以可以放心按：
@@ -470,7 +470,7 @@ cd /opt/torrent-search && sh scripts/docker.sh deploy
 
 ```bash
 node tools/remote-deploy.mjs deploy  --host user@server --dir /opt/torrent-search
-node tools/remote-deploy.mjs upgrade --host user@server --ref v1.1.0   # 一键升级 / 切版本
+node tools/remote-deploy.mjs upgrade --host user@server --ref v1.2.0   # 一键升级 / 切版本
 node tools/remote-deploy.mjs status  --host user@server
 node tools/remote-deploy.mjs logs    --host user@server
 node tools/remote-deploy.mjs doctor  --host user@server                # 在容器内诊断

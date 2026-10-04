@@ -3,7 +3,7 @@
  * 把项目部署 / 升级到一台装了 Docker 的远程服务器（走 ssh）。
  *
  *   node tools/remote-deploy.mjs deploy  --host user@server [--dir /opt/torrent-search]
- *   node tools/remote-deploy.mjs upgrade --host user@server [--ref v1.1.0]
+ *   node tools/remote-deploy.mjs upgrade --host user@server [--ref v1.2.0]
  *   node tools/remote-deploy.mjs status  --host user@server
  *   node tools/remote-deploy.mjs logs    --host user@server
  *   node tools/remote-deploy.mjs doctor  --host user@server
@@ -124,7 +124,7 @@ const USAGE = `部署 / 升级到远程服务器（需要服务器已装 Docker�
 命令：
   deploy    首次部署：推送代码 → 在服务器上构建并启动 → 健康检查
   upgrade   升级：推送代码 → 重建镜像 → 重启 → 健康检查（失败自动回滚）
-            --ref <tag|分支>   指定版本，例如 --ref v1.1.0
+            --ref <tag|分支>   指定版本，例如 --ref v1.2.0
   status    查看服务器上的容器状态与健康检查
   logs      跟随服务器上的容器日志
   doctor    在服务器容器内跑 P2P 环境诊断
