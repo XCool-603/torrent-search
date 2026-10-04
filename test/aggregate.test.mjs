@@ -292,7 +292,7 @@ test('searchAll：分页正确（含最后一页）', async () => {
   assert.equal(page9.total, 10);
 });
 
-test('searchAll：limitPerSource 默认随页码增长，便于翻页', async () => {
+test('searchAll：每源抓取条数有 100 的下限，且随页码增长', async () => {
   let observed = null;
   const spy = {
     id: 'spy',
@@ -307,11 +307,18 @@ test('searchAll：limitPerSource 默认随页码增长，便于翻页', async ()
     },
   };
 
+  // 下限 100：结果池不该因为「每页只显示 20 条」而变小。
+  // 早期下限是 50，于是每页 20 条时总数约 100、每页 100 条时约 190——
+  // 同一个关键词只是改了显示条数，结果就少了一半，看起来像「结果变少了」。
   await searchAll({ query: 'x', sources: [spy], page: 1, pageSize: 20, ...ctx() });
-  assert.equal(observed, 50);
-
-  await searchAll({ query: 'x', sources: [spy], page: 5, pageSize: 20, ...ctx() });
   assert.equal(observed, 100);
+
+  await searchAll({ query: 'x', sources: [spy], page: 1, pageSize: 100, ...ctx() });
+  assert.equal(observed, 100, '每页条数不该影响抓取量');
+
+  // 翻到更深页时才需要更多
+  await searchAll({ query: 'x', sources: [spy], page: 10, pageSize: 20, ...ctx() });
+  assert.equal(observed, 200);
 });
 
 test('searchOne：返回单源状态与样例', async () => {

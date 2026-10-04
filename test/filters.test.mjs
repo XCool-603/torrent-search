@@ -281,7 +281,8 @@ test('searchAll：缓存键区分关键词、源集合与每源抓取条数', as
 
   await searchAll({ query: 'a', sources: [source], pageSize: 20, cacheTtlMs: 60_000, ...ctx() });
   await searchAll({ query: 'b', sources: [source], pageSize: 20, cacheTtlMs: 60_000, ...ctx() });
-  await searchAll({ query: 'a', sources: [source], pageSize: 20, page: 5, cacheTtlMs: 60_000, ...ctx() });
+  // page: 10 → 每源 200 条（下限是 100，所以要用更大的页码才能拉开抓取条数）
+  await searchAll({ query: 'a', sources: [source], pageSize: 20, page: 10, cacheTtlMs: 60_000, ...ctx() });
 
   assert.equal(calls, 3, '不同关键词/不同抓取条数不应共用缓存');
   assert.equal(searchCacheSize(), 3);

@@ -47,8 +47,15 @@ export async function searchAll(options) {
   const page = Math.max(1, Math.floor(options.page ?? 1) || 1);
   const pageSize = Math.min(100, Math.max(1, Math.floor(options.pageSize ?? 20) || 20));
   const timeoutMs = Math.min(60_000, Math.max(1_000, Math.floor(options.timeoutMs ?? 8_000) || 8_000));
+  // 每源抓取条数。
+  //
+  // 关键：**不能取决于"每页显示多少条"**。早期下限是 50，于是每页 20 条时每源只抓 50，
+  // 用户看到的总数（约 100）比每页 100 条时（约 190）少一大截——同一个关键词，
+  // 只是改了显示条数，结果池就变了，看起来像"结果变少了"。
+  // 现在下限提到 100（apibay / bitsearch 本来就一次返回最多 100 条，请求数不变），
+  // 这样总数与分页设置无关；翻到更深页时再按需增加。
   const limitPerSource =
-    options.limitPerSource ?? Math.min(300, Math.max(50, pageSize * page));
+    options.limitPerSource ?? Math.min(300, Math.max(100, pageSize * page));
   const logger = options.logger ?? (() => {});
 
   const filters = normalizeFilters(options);
