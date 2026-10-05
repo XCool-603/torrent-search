@@ -9,13 +9,14 @@
 
 import apibay from './apibay.mjs';
 import nyaa from './nyaa.mjs';
+import sukebei from './sukebei.mjs';
 import bitsearch from './bitsearch.mjs';
 import mikan from './mikan.mjs';
 import dmhy from './dmhy.mjs';
 import academic from './academic.mjs';
 import demo from './demo.mjs';
 
-export const SOURCES = [apibay, nyaa, bitsearch, mikan, dmhy, academic, demo];
+export const SOURCES = [apibay, nyaa, sukebei, bitsearch, mikan, dmhy, academic, demo];
 
 export const SOURCE_MAP = new Map(SOURCES.map((source) => [source.id, source]));
 
@@ -77,4 +78,4 @@ export function resolveSources(selector) {
   return { sources, unknown };
 }
 
-export { apibay, nyaa, bitsearch, mikan, dmhy, academic, demo };
+export { apibay, nyaa, sukebei, bitsearch, mikan, dmhy, academic, demo };

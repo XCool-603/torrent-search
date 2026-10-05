@@ -353,12 +353,19 @@ network blocking P2P rather than a tool defect.
 | id | Site | Type | Default | Notes |
 | --- | --- | --- | --- | --- |
 | `apibay` | The Pirate Bay | General | ✅ | Official JSON API, up to 100 results per query |
-| `nyaa` | Nyaa | Anime/general | ✅ | RSS, includes category and seeder counts |
+| `nyaa` | Nyaa | Anime/general | ✅ | RSS, includes category and seeder counts (**no R18**) |
+| `sukebei` | Sukebei (Nyaa's adult site) | Adult | ✅ | Same RSS API as nyaa; every result is tagged adult, so the safe filter drops them all at once |
 | `bitsearch` | BitSearch | General | ✅ | DHT crawler index, JSON API, broad coverage |
 | `mikan` | Mikan Project | Chinese anime | ✅ | RSS search; the episode number *is* the info hash |
 | `dmhy` | DMHY (动漫花园) | Chinese anime | ✅ | RSS search; magnets are Base32 (normalised) |
 | `academic` | Academic Torrents | Academic | ✅ | No search API: the full catalogue (~3 MB) is cached locally and queried |
 | `demo` | Built-in offline data | Demo | ❌ | 10 fixed entries; works with no network |
+
+> **Why `sukebei` exists**: nyaa.si itself carries no R18 content (the site split it onto a separate
+> host), and apibay/bitsearch return at most 100 results per query each. Measured on the same keyword
+> (「无码」): nyaa.si gave 6 results, sukebei gave 75 — without it such searches look like "far fewer
+> results than before". Its results are all tagged adult, so the safe filter (or `--safe`) removes them
+> in one go.
 
 Adding a source means implementing one `search(query, ctx)` and registering it in
 `src/sources/index.mjs` (~60 lines). See [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 
 import apibay from '../src/sources/apibay.mjs';
 import nyaa from '../src/sources/nyaa.mjs';
+import sukebei from '../src/sources/sukebei.mjs';
 import bitsearch from '../src/sources/bitsearch.mjs';
 import mikan from '../src/sources/mikan.mjs';
 import dmhy from '../src/sources/dmhy.mjs';
 import academic from '../src/sources/academic.mjs';
 import demo from '../src/sources/demo.mjs';
 import { base32ToHex, parseMagnet } from '../src/magnet.mjs';
+import { filterResults } from '../src/aggregate.mjs';
 import { fixture, stubHttp, memoryCache } from './helpers.mjs';
 
 /** 每个适配器的默认 ctx */
@@ -262,8 +264,34 @@ test('demo：离线、确定性、可按关键词过滤', async () => {
   assert.deepEqual(await demo.search('zzzznotexist', { limit: 100 }), []);
 });
 
+test('sukebei：解析成人分站的 RSS，并把结果全部标记为成人', async () => {
+  const http = stubHttp([['sukebei.nyaa.si', fixture('sukebei-wuma.xml')]]);
+  const results = await sukebei.search('无码', ctxFor(http));
+
+  assert.ok(results.length > 50, `夹具应有大量条目，实际 ${results.length}`);
+
+  const [first] = results;
+  assert.equal(first.source, 'sukebei');
+  assert.ok(first.title.length > 0);
+  assert.match(first.infoHash, /^[0-9a-f]{40}$/);
+
+  // 关键行为：整站都是成人内容，必须逐条标记，否则「安全过滤」形同虚设
+  assert.equal(results.every((result) => result.adult === true), true);
+});
+
+test('sukebei：结果会被安全过滤排除（与 apibay 成人分类一致）', async () => {
+  const http = stubHttp([['sukebei.nyaa.si', fixture('sukebei-wuma.xml')]]);
+  const results = await sukebei.search('无码', ctxFor(http));
+
+  const kept = filterResults(results, { safe: false });
+  const dropped = filterResults(results, { safe: true });
+
+  assert.equal(kept.length, results.length, '不开安全过滤时应全部保留');
+  assert.equal(dropped.length, 0, '开安全过滤后应一条不剩');
+});
+
 test('所有适配器都满足统一契约', async () => {
-  const modules = [apibay, nyaa, bitsearch, mikan, dmhy, academic, demo];
+  const modules = [apibay, nyaa, sukebei, bitsearch, mikan, dmhy, academic, demo];
   for (const source of modules) {
     assert.equal(typeof source.id, 'string', `${source.id} 缺少 id`);
     assert.equal(typeof source.name, 'string');

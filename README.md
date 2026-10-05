@@ -399,12 +399,18 @@ node skills/torrent-search/scripts/torrent-search.mjs download "<磁力>" --dir 
 | id | 站点 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- | --- |
 | `apibay` | The Pirate Bay | 综合 | ✅ | 官方 JSON 接口，一次最多 100 条 |
-| `nyaa` | Nyaa | 动漫/综合 | ✅ | RSS 接口，含分类与做种数 |
+| `nyaa` | Nyaa | 动漫/综合 | ✅ | RSS 接口，含分类与做种数（**不含 R18**） |
+| `sukebei` | Sukebei（Nyaa 成人站） | 成人 | ✅ | 与 nyaa 同一套 RSS 接口；结果全部标记为成人分类，可用「安全过滤」一键排除 |
 | `bitsearch` | BitSearch | 综合 | ✅ | DHT 爬虫索引，JSON 接口，覆盖面广 |
 | `mikan` | Mikan Project（蜜柑计划） | 中文动漫 | ✅ | RSS 搜索，Episode 编号即 info hash |
 | `dmhy` | 动漫花园 | 中文动漫 | ✅ | RSS 搜索，磁力是 Base32（已归一化） |
 | `academic` | Academic Torrents | 学术 | ✅ | 无搜索接口，全量库（约 3 MB）缓存到本地后检索 |
 | `demo` | 内置离线数据 | 演示 | ❌ | 10 条固定数据，断网也能演示/自测 |
+
+> **为什么需要 `sukebei`**：nyaa.si 本身不含 R18（站点把这类内容拆到了分站），
+> 而 apibay / bitsearch 每源一次最多只给 100 条。实测同一个关键词「无码」：
+> nyaa.si 只有 6 条，sukebei 有 75 条——不加这个源就会觉得「结果少了很多」。
+> 它的结果全部标记为成人分类，所以「安全过滤」或 `--safe` 能把它们整批排除。
 
 新增数据源只需实现一个 `search(query, ctx)` 并注册到 `src/sources/index.mjs`（约 60 行）。
 
