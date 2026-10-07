@@ -47,8 +47,27 @@ jobs:
       - name: 校验 compose 配置与变量插值
         run: docker compose config
 
-      - name: 构建镜像
+      # 记录基础镜像里已有的用户：官方 node 镜像自带 node:1000，
+      # 而 Linux 宿主 id -u 通常正好是 1000 —— 这正是构建失败的原因
+      - name: 基础镜像里的用户（确认 UID 冲突）
+        run: |
+          docker run --rm node:22-alpine sh -c 'echo "--- passwd ---"; tail -n 3 /etc/passwd; echo "--- group ---"; tail -n 3 /etc/group'
+
+      - name: 构建镜像（默认 UID）
         run: docker build --progress=plain -t torrent-search:verify .
+
+      # 宿主 UID=1000 时与基础镜像自带的 node 用户冲突：
+      # 早期 Dockerfile 直接 adduser -u 1000 会在这里构建失败
+      - name: 构建镜像（宿主 UID=1000，冲突场景）
+        run: docker build --progress=plain --build-arg UID=1000 --build-arg GID=1000 -t torrent-search:verify-hostuid .
+
+      - name: 以宿主 UID 运行时仍能写下载目录
+        run: |
+          uid=$(docker run --rm torrent-search:verify-hostuid id -u)
+          echo "容器内 UID = $uid"
+          test "$uid" = "1000" || { echo "应以传入的 UID 运行"; exit 1; }
+          docker run --rm torrent-search:verify-hostuid sh -c 'touch /downloads/.w && rm /downloads/.w'
+          docker run --rm -v ts-verify-hostuid:/downloads torrent-search:verify-hostuid sh -c 'touch /downloads/.w && rm /downloads/.w'
 
       - name: 容器以非 root 用户运行
         run: |
