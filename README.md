@@ -460,7 +460,7 @@ cd torrent-search
 
 ```bash
 sh scripts/docker.sh upgrade              # 拉取最新 main → 重建镜像 → 重启 → 健康检查
-sh scripts/docker.sh upgrade --ref v1.2.0 # 升级/回退到指定版本（tag 或分支）
+sh scripts/docker.sh upgrade --ref v1.2.1 # 升级/回退到指定版本（tag 或分支）
 sh scripts/docker.sh upgrade --no-cache   # 不用构建缓存
 ```
 
@@ -468,7 +468,7 @@ Windows：
 
 ```powershell
 .\scripts\docker.ps1 upgrade
-.\scripts\docker.ps1 upgrade --ref v1.2.0
+.\scripts\docker.ps1 upgrade --ref v1.2.1
 ```
 
 升级脚本做了这些事，所以可以放心按：
@@ -504,7 +504,9 @@ cd /opt/torrent-search && sh scripts/docker.sh deploy
 
 ```bash
 node tools/remote-deploy.mjs deploy  --host user@server --dir /opt/torrent-search
-node tools/remote-deploy.mjs upgrade --host user@server --ref v1.2.0   # 一键升级 / 切版本
+node tools/remote-deploy.mjs upgrade --host user@server --ref v1.2.1   # 一键升级 / 切版本
+
+> ⚠️ `--ref <tag>` 会把部署**钉死在那个版本**。固定在旧 tag 上就永远拿不到后续修复——v1.2.0 就因此带着「UID 撞号必构建失败」的问题。除非要回退，升级时省略 `--ref`。
 node tools/remote-deploy.mjs status  --host user@server
 node tools/remote-deploy.mjs logs    --host user@server
 node tools/remote-deploy.mjs doctor  --host user@server                # 在容器内诊断
