@@ -387,125 +387,71 @@ so it cannot be switched at runtime).
 
 ## Docker deployment
 
-### One-command deploy
+### Deploy (plain docker commands, no scripts)
 
 ```bash
 git clone https://github.com/XCool-603/torrent-search.git
 cd torrent-search
-sh scripts/docker.sh deploy
+
+# Build with your host UID/GID: a bind mount hides the image's ownership,
+# so a mismatch means the container cannot write to ./downloads
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
+
+
+docker compose ps                                  # status
+docker compose logs -f                             # logs
+docker compose exec torrent-search node bin/magnet-search.mjs doctor   # in-container diagnosis
 ```
 
-The script checks Docker, creates `.env` from `.env.example`, builds the image, starts the container,
-and **only reports success once the health check passes** (on failure it prints the container logs).
-It ends by telling you the URL and the download directory.
+Open <http://127.0.0.1:8787/>. It publishes to loopback only by default (there is **no authentication**).
 
-Without the script, two commands do the same:
+**It also works without UID/GID** (the image default 10001), but then hand the download directory over:
 
 ```bash
-cp .env.example .env          # optional: port, download directory, download backend
-docker compose up -d --build
+sudo chown -R 10001:10001 ./downloads
 ```
 
-Windows PowerShell:
+### Upgrade
 
-```powershell
-git clone https://github.com/XCool-603/torrent-search.git
+```bash
 cd torrent-search
-.\scripts\docker.ps1 deploy
+git pull
+
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
+
 ```
 
-### One-command upgrade
+Downloaded files and unfinished tasks are unaffected (`./downloads` is a bind mount and the task
+records live in `tasks.json` right there).
 
-```bash
-sh scripts/docker.sh upgrade              # pull latest main → rebuild → restart → health check
-sh scripts/docker.sh upgrade --ref v1.2.1 # move to a specific tag or branch (also works for rollback)
-sh scripts/docker.sh upgrade --no-cache   # skip the build cache
-```
-
-Windows:
-
-```powershell
-.\scripts\docker.ps1 upgrade
-.\scripts\docker.ps1 upgrade --ref v1.2.1
-```
-
-The upgrade script is safe to run because it:
-
-- **records the current commit first** and **automatically rolls back** if the rebuilt container fails
-  its health check;
-- **aborts when tracked files have local modifications** (it will not overwrite your edits); untracked
-  files such as `.env` and `downloads/` do not block an upgrade;
-- handles a previous `--ref` upgrade (detached HEAD) by switching back to the default branch first;
-- keeps **downloads and the task list inside the `./downloads` volume** — upgrading, rebuilding or
-  removing the container never touches them, and unfinished downloads resume automatically on restart.
-
-Other commands:
-
-```bash
-sh scripts/docker.sh status   # container status + health check
-sh scripts/docker.sh logs     # follow logs
-sh scripts/docker.sh down     # stop and remove the container (downloads are kept)
-```
-
-> On a slow machine the health check may need longer than the default 30 × 2 s:
-> `TORRENT_SEARCH_HEALTH_ATTEMPTS=60 sh scripts/docker.sh deploy`
+> ⚠️ **`docker compose build` does not pull new code** — always `git pull` first.
+> The old `scripts/docker.sh deploy` did exactly that (build + up, never a pull), which is why it
+> kept rebuilding stale code. That script and its Windows twin have been removed.
 
 ### Deploying to a server
-
-Any server with Docker works exactly like a local machine:
 
 ```bash
 # on the server
 git clone https://github.com/XCool-603/torrent-search.git /opt/torrent-search
-cd /opt/torrent-search && sh scripts/docker.sh deploy
+cd /opt/torrent-search
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
+
 ```
 
-Rather not install git on the server? Push from your machine instead — this needs **only ssh and tar**,
-not git or Node on the server:
+There is **no authentication**: anyone who can reach it can create download tasks (writing files into
+the download directory). It binds to loopback by default; prefer an SSH tunnel:
 
 ```bash
-node tools/remote-deploy.mjs deploy  --host user@server --dir /opt/torrent-search
-node tools/remote-deploy.mjs upgrade --host user@server --ref v1.2.1   # upgrade / pin a version
-
-> ⚠️ `--ref <tag>` **pins the deployment to that version**. Pinning an old tag means you never receive later fixes — v1.2.0 shipped with a build that always failed on a UID collision for exactly this reason. Omit `--ref` unless you are deliberately rolling back.
-node tools/remote-deploy.mjs status  --host user@server
-node tools/remote-deploy.mjs logs    --host user@server
-node tools/remote-deploy.mjs doctor  --host user@server                # diagnose inside the container
-```
-
-> `.env` and `downloads/` are **never overwritten** when pushing — that is your configuration and your
-> downloaded files. The code is transferred as a tar stream and the target directory is replaced, so do
-> not keep unrelated files there.
-
-**Security (important)**: this service has **no authentication** — anyone who can reach it can create
-download tasks (and thus write files into the download directory). The container therefore binds to the
-server's loopback by default; reach it through an SSH tunnel:
-
-```bash
-node tools/remote-deploy.mjs tunnel --host user@server
+ssh -N -L 8787:127.0.0.1:8787 user@your-server
 # then open http://127.0.0.1:8787/ locally
 ```
 
-**To let other devices on your LAN connect directly** (at your own risk: anyone on that subnet can use it):
+To expose it on the LAN, set `TORRENT_SEARCH_BIND=0.0.0.0` in `.env` and open **both** doors:
+the server firewall (`ufw allow 8787` or `firewall-cmd --add-port=8787/tcp`) **and** your cloud
+provider's security group. With no authentication, put a reverse proxy with auth in front of it.
 
-```bash
-node tools/remote-deploy.mjs deploy --host user@server --bind 0.0.0.0
-```
-
-This sets `TORRENT_SEARCH_BIND=0.0.0.0` in the server's `.env`, redeploys, and prints the address.
-You still have to open the port — **two gates**:
-
-```bash
-# 1) the server's own firewall (pick one)
-sudo ufw allow from 192.168.0.0/16 to any port 8787 proto tcp
-sudo firewall-cmd --permanent --add-port=8787/tcp && sudo firewall-cmd --reload
-
-# 2) on a cloud server, also allow 8787 in the provider's security group, restricted to your LAN range
-```
-
-> **Do not** expose it directly to the internet — that opens an endpoint that can write files on your
-> server. If you really need public access, put it behind an authenticating reverse proxy
-> (Caddy / nginx basic auth).
+To route downloads through a VPN (P2P is often blocked on restricted networks), see the gluetun
+example in the comments at the end of `docker-compose.yml`.
 
 ### Configuration
 
@@ -534,19 +480,21 @@ Diagnostics inside the container:
 docker compose exec torrent-search node bin/magnet-search.mjs doctor
 ```
 
-> **Download directory permissions on Linux / NAS**: the container runs as non-root, while a bind mount's
-> ownership comes from the host — mismatched UIDs make downloads fail with a permission error (`docker
-> compose up` also creates a missing `./downloads` as root). `scripts/docker.sh` **rebuilds with your own
-> UID/GID on Linux** (`--build-arg`) and pre-creates the download directory, so scripted deployments need
-> no extra steps. If you run `docker compose` by hand, align them yourself:
+> **Download directory permissions on Linux / NAS**: the container runs as non-root while a bind
+> mount takes its ownership from the host — a UID mismatch means permission errors (`docker compose up`
+> will also create a missing `./downloads` as root). Pass your host IDs at build time
+> (`build.args` in `docker-compose.yml` already wires them up):
 >
 > ```bash
 > mkdir -p downloads
-> docker compose build --build-arg UID=$(id -u) --build-arg GID=$(id -g) && docker compose up -d
+> APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
 > ```
 >
+> The names are `APP_UID`/`APP_GID`, not `UID`/`GID`: **`UID` is a readonly shell variable in bash**,
+> so `UID=$(id -u) ...` fails with `UID: readonly variable`.
+> Building without them works too (image default 10001) — then run
+> `sudo chown -R 10001:10001 ./downloads`.
 > Docker Desktop bind mounts (Windows/macOS) are permissive, so this needs no action.
-> To opt out of the automatic alignment: `TORRENT_SEARCH_FIX_OWNER=0 sh scripts/docker.sh deploy`.
 
 ### Three honest notes about containerising
 

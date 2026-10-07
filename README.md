@@ -430,118 +430,68 @@ node bin/magnet-search.mjs "ubuntu" --proxy auto             # 自动探测（�
 
 ## Docker 部署
 
-### 一键部署
+### 部署（纯 docker 命令，不需要任何脚本）
 
 ```bash
 git clone https://github.com/XCool-603/torrent-search.git
 cd torrent-search
-sh scripts/docker.sh deploy
+
+# 与宿主 UID/GID 对齐构建：绑定挂载会盖掉镜像里的属主，不一致就写不进 ./downloads
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
+
+
+docker compose ps                                  # 状态
+docker compose logs -f                             # 日志
+docker compose exec torrent-search node bin/magnet-search.mjs doctor   # 容器内诊断
 ```
 
-脚本会检查 Docker、从 `.env.example` 生成 `.env`、构建镜像、启动容器，并**等到健康检查通过才报成功**
-（失败会直接把容器日志打出来）。完成后会告诉你访问地址与下载目录。
+访问 <http://127.0.0.1:8787/>。默认只发布到回环地址（本服务**没有鉴权**）。
 
-不想用脚本，两条命令也一样：
+**不传 UID/GID 也能跑**（用镜像默认的 10001），但要把下载目录交给它：
 
 ```bash
-cp .env.example .env          # 可选：改端口、下载目录、下载后端
-docker compose up -d --build
+sudo chown -R 10001:10001 ./downloads
 ```
 
-Windows PowerShell：
+### 升级
 
-```powershell
-git clone https://github.com/XCool-603/torrent-search.git
+```bash
 cd torrent-search
-.\scripts\docker.ps1 deploy
+git pull
+
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
+
 ```
 
-### 一键升级
+已下载的文件与未完成任务都不受影响（`./downloads` 是绑定挂载，任务记录就在同目录的 `tasks.json`）。
 
-```bash
-sh scripts/docker.sh upgrade              # 拉取最新 main → 重建镜像 → 重启 → 健康检查
-sh scripts/docker.sh upgrade --ref v1.2.1 # 升级/回退到指定版本（tag 或分支）
-sh scripts/docker.sh upgrade --no-cache   # 不用构建缓存
-```
-
-Windows：
-
-```powershell
-.\scripts\docker.ps1 upgrade
-.\scripts\docker.ps1 upgrade --ref v1.2.1
-```
-
-升级脚本做了这些事，所以可以放心按：
-
-- **先记录当前提交**，重建后健康检查不过就**自动回滚**到升级前的版本；
-- 检测到**已跟踪文件的本地改动就中止**（不会覆盖你的修改）；`.env`、`downloads/` 这类未跟踪文件不影响升级；
-- 上次用 `--ref` 升级过（处于 detached HEAD）也能直接再升级，会自动切回默认分支；
-- **下载文件与任务记录都在 `./downloads` 卷里，升级、重建、删容器都不会动它们**；
-  重启后未完成的下载会自动续传（`serve` 默认开启自动续传）。
-
-其它常用命令：
-
-```bash
-sh scripts/docker.sh status   # 容器状态 + 健康检查
-sh scripts/docker.sh logs     # 跟随日志
-sh scripts/docker.sh down     # 停止并移除容器（下载文件保留）
-```
-
-> 慢机器上健康检查可能等不够（默认等 30 次 × 2 秒）：
-> `TORRENT_SEARCH_HEALTH_ATTEMPTS=60 sh scripts/docker.sh deploy`
+> ⚠️ **`docker compose build` 不会自动拉新代码**，务必先 `git pull`。
+> 早期版本提供的 `scripts/docker.sh deploy` 正是因此反复构建旧代码（它只 build+up，不拉代码），
+> 该脚本与其 Windows 版本已一并删除。
 
 ### 部署到服务器
-
-服务器上装了 Docker 就能跑，步骤与本机完全一致：
 
 ```bash
 # 在服务器上
 git clone https://github.com/XCool-603/torrent-search.git /opt/torrent-search
-cd /opt/torrent-search && sh scripts/docker.sh deploy
+cd /opt/torrent-search
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
+
 ```
 
-不想在服务器上装 git？从你本机推过去即可（**只依赖 ssh 与 tar**，不要求服务器装 git 或 Node）：
+本服务**没有鉴权**：能访问到它的人都能创建下载任务（往下载目录写文件）。默认只绑回环，
+推荐用 SSH 隧道访问：
 
 ```bash
-node tools/remote-deploy.mjs deploy  --host user@server --dir /opt/torrent-search
-node tools/remote-deploy.mjs upgrade --host user@server --ref v1.2.1   # 一键升级 / 切版本
-
-> ⚠️ `--ref <tag>` 会把部署**钉死在那个版本**。固定在旧 tag 上就永远拿不到后续修复——v1.2.0 就因此带着「UID 撞号必构建失败」的问题。除非要回退，升级时省略 `--ref`。
-node tools/remote-deploy.mjs status  --host user@server
-node tools/remote-deploy.mjs logs    --host user@server
-node tools/remote-deploy.mjs doctor  --host user@server                # 在容器内诊断
-```
-
-> 推送时 `.env` 与 `downloads/` **永远不会被覆盖**——那是服务器上的配置和你的下载文件。
-> 代码以 tar 流传输，服务器的目录会被整体替换，所以别把别的东西放进部署目录。
-
-**安全（重要）**：本服务**没有鉴权**，任何能访问到它的人都能创建下载任务（往下载目录写文件）。
-所以容器**默认只绑服务器回环**，从本机用 SSH 隧道访问：
-
-```bash
-node tools/remote-deploy.mjs tunnel --host user@server
+ssh -N -L 8787:127.0.0.1:8787 user@你的服务器
 # 然后本地浏览器打开 http://127.0.0.1:8787/
 ```
 
-**要让局域网内其它设备直接访问**（自担风险：同网段的人都能用）：
+要让局域网内其它设备直接访问，在 `.env` 里设 `TORRENT_SEARCH_BIND=0.0.0.0`，
+并**同时**放行两道门：服务器防火墙（`ufw allow 8787` 或 `firewall-cmd --add-port=8787/tcp`）
+和云厂商的安全组。没有鉴权时，建议再套一层反向代理做认证。
 
-```bash
-node tools/remote-deploy.mjs deploy --host user@server --bind 0.0.0.0
-```
-
-它会把服务器 `.env` 里的 `TORRENT_SEARCH_BIND` 改成 `0.0.0.0` 并重新部署，然后告诉你地址。
-还需要放行端口——**两道门都要开**：
-
-```bash
-# ① 服务器自身防火墙（按发行版选一条）
-sudo ufw allow from 192.168.0.0/16 to any port 8787 proto tcp
-sudo firewall-cmd --permanent --add-port=8787/tcp && sudo firewall-cmd --reload
-
-# ② 云服务器还要在控制台的「安全组」里放行 8787，来源只填你的内网网段
-```
-
-> **不要**把它直接暴露到公网——那等于把一个"能往服务器写文件"的接口敞开。
-> 确实需要公网访问时，请放在带鉴权的反向代理（Caddy / nginx basic auth）之后。
+想让下载走 VPN 出口（受限网络下 BT 常被拦），见 `docker-compose.yml` 末尾的 gluetun 示例注释。
 
 ### 配置
 
@@ -571,17 +521,18 @@ docker compose exec torrent-search node bin/magnet-search.mjs doctor
 ```
 
 > **Linux / NAS 上的下载目录权限**：容器以非 root 运行，而绑定挂载的目录属主由宿主机决定——
-> 如果两边 UID 不一致，下载会报权限错误（`docker compose up` 还会以 root 创建缺失的 `./downloads`）。
-> `scripts/docker.sh` 在 **Linux 上会自动按当前用户重建镜像**（`--build-arg UID/GID`）并预建下载目录，
-> 所以用脚本部署时不需要额外处理。如果你手动跑 `docker compose`，请自己对齐：
+> 两边 UID 不一致就会报权限错误（`docker compose up` 还会以 root 创建缺失的 `./downloads`）。
+> 所以构建时把宿主的号传进去（`docker-compose.yml` 的 `build.args` 已经接好了）：
 >
 > ```bash
 > mkdir -p downloads
-> docker compose build --build-arg UID=$(id -u) --build-arg GID=$(id -g) && docker compose up -d
+> APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
 > ```
 >
+> 变量名用 `APP_UID`/`APP_GID` 而不是 `UID`/`GID`：**bash 里 `UID` 是只读内置变量**，
+> `UID=$(id -u) ...` 会直接报 `UID: readonly variable`。
+> 不传也能构建（用镜像默认的 10001），那时需要 `sudo chown -R 10001:10001 ./downloads`。
 > Docker Desktop（Windows/macOS）的绑定挂载是模拟的、宽松的，不需要处理。
-> 需要临时关掉自动对齐：`TORRENT_SEARCH_FIX_OWNER=0 sh scripts/docker.sh deploy`。
 
 ### 容器化的三个实话
 

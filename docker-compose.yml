@@ -1,16 +1,28 @@
 # 种子搜索 —— Docker Compose 部署
 #
-# 用法：
-#   docker compose up -d --build          # 构建并后台启动
-#   docker compose logs -f                # 看日志
+# 用法（不需要任何脚本）：
+#   APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build   # 与宿主 UID/GID 对齐
+#   docker compose up -d                             # 后台启动
+#   docker compose logs -f                           # 看日志
 #   docker compose exec torrent-search node bin/magnet-search.mjs doctor   # 容器内诊断
-#   docker compose down                   # 停止
+#   docker compose down                              # 停止
+#
+# 升级：
+#   git pull
+#   APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
+#   docker compose up -d
 #
 # 访问：http://127.0.0.1:8787/（或宿主机 IP:8787，局域网内其它设备也能打开）
 
 services:
   torrent-search:
-    build: .
+    build:
+      context: .
+      # 与宿主 UID/GID 对齐：绑定挂载会盖掉镜像里的属主，不一致就写不进 ./downloads。
+      # 不传则用 10001，此时需要 sudo chown -R 10001:10001 ./downloads。
+      args:
+        APP_UID: ${APP_UID:-10001}
+        APP_GID: ${APP_GID:-10001}
     image: torrent-search:local
     container_name: torrent-search
 

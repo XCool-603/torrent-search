@@ -176,9 +176,12 @@ publish) before pasting.
 
 ## Deployment scripts
 
-`scripts/docker.sh` (POSIX sh) and `scripts/docker.ps1` (Windows PowerShell) implement the documented
-one-command deploy/upgrade: `deploy`, `upgrade [--ref <tag>] [--no-cache]`, `status`, `logs`, `down`.
-Both must stay behaviourally identical — when you change one, change the other.
+**Deployment is plain `docker compose` — there are deliberately no wrapper scripts.**
+Do not add a `scripts/docker.sh`-style wrapper: it hides docker's own error messages, adds a new
+failure surface (line endings, exec bits, argument quoting), and tends to bake in the wrong values
+(hard-coding host UID 1000 into `--build-arg`, which then collides with the `node` user inside the
+image). Anything worth fixing belongs in `docker-compose.yml` (`build.args`, `healthcheck`,
+`depends_on`) or in the host crontab calling `docker compose` directly.
 
 Rules that came out of real breakage:
 

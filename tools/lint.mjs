@@ -164,29 +164,17 @@ async function checkNoRuntimeDependencies() {
  * 源码文件的 BOM 约定。
  *
  * 这两条要求是**相反的**，而且都踩过：
- *   - .ps1 含中文时必须带 UTF-8 BOM：Windows PowerShell 5.1 没有 BOM 会按 ANSI(GBK) 解码，
  *     中文被拆坏后连字符串引号都会被吃掉，直接变成语法错误；
- *   - 其它源码（.mjs/.js/.sh）绝不能带 BOM：.sh 的 shebang 会被破坏，
+ *   - 源码（.mjs/.js）绝不能带 BOM：shebang 前多三个字节就会报语法错误。
  *     .mjs 的 shebang 同样会被破坏（`#!/usr/bin/env node` 前多三个字节就报语法错误）。
  *
- * 编辑 .ps1 的工具常常会丢 BOM，而 PowerShell 的 `Set-Content -Encoding UTF8`
- * 又会给别的文件加上 BOM——两头都发生过，所以必须由 lint 兜住。
  */
 async function checkScriptEncodings() {
   const BOM = [0xef, 0xbb, 0xbf];
 
   const hasBom = (buffer) => buffer.length >= 3 && buffer[0] === BOM[0] && buffer[1] === BOM[1] && buffer[2] === BOM[2];
 
-  // ① .ps1 必须带 BOM
-  const ps1 = path.join(ROOT, 'scripts', 'docker.ps1');
-  try {
-    if (!hasBom(await fs.readFile(ps1))) {
-      problems.push('scripts/docker.ps1 缺少 UTF-8 BOM：Windows PowerShell 5.1 需要它才能正确读中文');
-    }
-  } catch {
-    problems.push('缺少部署脚本 scripts/docker.ps1');
-  }
-
+    // 源码一律不能带 BOM：shebang 前多三个字节就会报语法错误。
   // ② 其它源码一律不能带 BOM
   const SKIP_DIRS = new Set(['.git', '.cache', 'downloads', 'node_modules', 'fixtures']);
   const walk = async (dir) => {
