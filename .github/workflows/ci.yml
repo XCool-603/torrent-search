@@ -58,8 +58,12 @@ jobs:
 
       # 宿主 UID=1000 时与基础镜像自带的 node 用户冲突：
       # 早期 Dockerfile 直接 adduser -u 1000 会在这里构建失败
-      - name: 构建镜像（宿主 UID=1000，冲突场景）
+      - name: 构建镜像（宿主 UID=1000，UID/GID 都被占）
         run: docker build --progress=plain --build-arg UID=1000 --build-arg GID=1000 -t torrent-search:verify-hostuid .
+
+      # 宿主 uid 与 gid 不相等时走的是另一条分支（UID 被占、GID 空闲），必须单独测
+      - name: 构建镜像（宿主 UID=1000 / GID=1001，UID 被占而 GID 空闲）
+        run: docker build --progress=plain --build-arg UID=1000 --build-arg GID=1001 -t torrent-search:verify-hostuid2 .
 
       - name: 以宿主 UID 运行时仍能写下载目录
         run: |
@@ -68,6 +72,22 @@ jobs:
           test "$uid" = "1000" || { echo "应以传入的 UID 运行"; exit 1; }
           docker run --rm torrent-search:verify-hostuid sh -c 'touch /downloads/.w && rm /downloads/.w'
           docker run --rm -v ts-verify-hostuid:/downloads torrent-search:verify-hostuid sh -c 'touch /downloads/.w && rm /downloads/.w'
+
+      - name: UID/GID 不等时同样可写（UID 被占、GID 空闲）
+        run: |
+          out=$(docker run --rm torrent-search:verify-hostuid2 sh -c 'id -u; id -g')
+          echo "容器内 id -u / id -g = $(echo "$out" | tr '\n' ' ')"
+          test "$(echo "$out" | head -n1)" = "1000" || { echo "UID 应为 1000"; exit 1; }
+          test "$(echo "$out" | tail -n1)" = "1001" || { echo "GID 应为 1001"; exit 1; }
+          docker run --rm torrent-search:verify-hostuid2 sh -c 'touch /downloads/.w && rm /downloads/.w'
+          docker run --rm -v ts-verify-hostuid2:/downloads torrent-search:verify-hostuid2 sh -c 'touch /downloads/.w && rm /downloads/.w'
+
+      - name: 拒绝以 root 运行（UID=0 必须构建失败）
+        run: |
+          if docker build --build-arg UID=0 -t torrent-search:verify-uid0 . >/dev/null 2>&1; then
+            echo "UID=0 不该构建成功"; exit 1
+          fi
+          echo "✓ UID=0 已被拒绝"
 
       - name: 容器以非 root 用户运行
         run: |

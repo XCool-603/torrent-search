@@ -19,6 +19,11 @@ ARG UID=10001
 ARG GID=10001
 
 RUN set -eux; \
+    # 拒绝以 root 运行：否则 --build-arg UID=0 会悄悄产出 root 容器。
+    # 本镜像不需要 root（监听 8787，只写 /downloads 与缓存目录）。
+    if [ "${UID}" = "0" ]; then \
+      echo "拒绝 UID=0：本镜像设计为非 root 运行（若确实需要，请改这里）" >&2; exit 1; \
+    fi; \
     # 组：GID 空闲才建，否则复用现有组名（adduser -G 需要名字）
     if ! grep -qE ":${GID}:" /etc/group; then addgroup -g "${GID}" app; fi; \
     # 用户：UID 空闲才建；已被占用（例如 node:1000）就跳过，直接用那个身份
@@ -26,7 +31,8 @@ RUN set -eux; \
       GROUP_NAME="$(awk -F: -v gid="${GID}" '$3 == gid { print $1 }' /etc/group)"; \
       adduser -u "${UID}" -G "${GROUP_NAME}" -h /home/app -s /sbin/nologin -D app; \
     fi; \
-    # 运行期要写的目录：-h 之外还得真建出来，否则写缓存会失败且报错位置离根因很远
+    # 运行期要写的目录：-h 之外还得真建出来，否则写缓存会失败且报错位置离根因很远。
+    # 用 chown 数字 ID，不用 install -d -o <用户名>——复用已有用户时名字不是 app。
     mkdir -p /downloads /home/app/.cache; \
     chown "${UID}:${GID}" /downloads /home/app/.cache
 
