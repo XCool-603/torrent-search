@@ -407,6 +407,22 @@ test('端到端：下载中的任务按 Range 取字节，内容逐字节正确'
   });
 });
 
+test('端到端：等待分片期间下载刚好完成时，改从磁盘服务而不是 503', async () => {
+  // 竞态回归：请求文件末尾（此刻还没下到），等待期间下载完成、会话被清掉，
+  // isAlive 立刻为假。此时文件已经完整，必须改从磁盘服务——
+  // 早期直接返回 503，播放器会白等一次重试（CI 上 Node 22/ubuntu 抓到过）。
+  await withStreamServer(async ({ port, manager, swarm, content, waitForSession }) => {
+    manager.add({ input: swarm.magnet, backend: 'builtin' });
+    await waitForSession();
+
+    const tail = await rawGet(port, `/api/stream/${swarm.infoHash}/0`, {
+      range: `bytes=${content.length - 1000}-`,
+    });
+
+    assert.equal(tail.status, 206, '下载完成后应改从磁盘服务，而不是 503');
+    assert.deepEqual(tail.body, content.subarray(content.length - 1000));
+  });
+});
 test('端到端：文件清单、HEAD、416、404、400', async () => {
   await withStreamServer(async ({ port, manager, swarm, content, waitForSession }) => {
     manager.add({ input: swarm.magnet, backend: 'builtin' });

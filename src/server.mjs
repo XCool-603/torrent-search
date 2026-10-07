@@ -339,9 +339,15 @@ const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见
       'access-control-expose-headers': 'content-range, accept-ranges, content-length',
     });
 
-    // ---- 已下完：文件在磁盘上完整且校验过，直接按 Range 读文件流 ----
-    // 比读进内存更省，也解决了「引擎已关闭会话、句柄不可用」的问题。
-    if (finishedOnDisk) {
+    /**
+     * 从磁盘按 Range 提供文件。
+     *
+     * @param {{requireExactSize?: boolean}} [options]
+     *   requireExactSize：只有文件长度与种子一致才服务。用于「等待分片期间下载刚好完成」
+     *   的兜底路径——那里必须确认文件真的完整，否则会把残缺文件当完整文件发出去。
+     * @returns {Promise<boolean>} 是否已经处理了响应
+     */
+    const serveFromDisk = async (options = {}) => {
       const absolute = path.resolve(task.dir, file.path);
       assertInside(task.dir, absolute);
 
@@ -349,22 +355,22 @@ const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见
       try {
         stat = await fs.stat(absolute);
       } catch {
-        sendJson(res, 404, { error: { code: 'file_missing', message: `文件不在磁盘上：${file.path}` } });
-        return;
+        return false;
       }
+      if (options.requireExactSize === true && stat.size !== file.length) return false;
 
       const diskSize = stat.size;
       if (diskSize === 0) {
         res.writeHead(200, { ...streamHeaders(), 'content-length': '0' });
         res.end();
-        return;
+        return true;
       }
 
       const diskRange = parseRange(req.headers.range, diskSize);
       if (diskRange?.unsatisfiable) {
         res.writeHead(416, { ...streamHeaders(), 'content-range': `bytes */${diskSize}` });
         res.end();
-        return;
+        return true;
       }
 
       const diskPartial = Boolean(diskRange && !diskRange.unsupported);
@@ -376,9 +382,17 @@ const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见
       res.writeHead(diskPartial ? 206 : 200, diskHeaders);
       if (req.method === 'HEAD') {
         res.end();
-        return;
+        return true;
       }
       createReadStream(absolute, { start: diskStart, end: diskEnd }).pipe(res);
+      return true;
+    };
+
+    // ---- 已下完：文件在磁盘上完整且校验过，直接按 Range 读文件流 ----
+    // 比读进内存更省，也解决了「引擎已关闭会话、句柄不可用」的问题。
+    if (finishedOnDisk) {
+      if (await serveFromDisk()) return;
+      sendJson(res, 404, { error: { code: 'file_missing', message: `文件不在磁盘上：${file.path}` } });
       return;
     }
 
@@ -433,6 +447,11 @@ const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见
       });
     } catch (error) {
       if (res.headersSent || res.writableEnded) return;
+
+      // 竞态：等待分片期间下载刚好完成，会话被清掉，isAlive 立刻为假。
+      // 此时文件已经完整，应当改从磁盘服务，而不是让播放器拿到 503 去重试。
+      if (task.status === 'done' && (await serveFromDisk({ requireExactSize: true }))) return;
+
       sendJson(res, 503, {
         error: { code: 'data_not_ready', message: error?.message ?? String(error) },
       });
