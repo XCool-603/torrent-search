@@ -11,7 +11,8 @@ import { createHttpClient, detectSystemProxy } from './http.mjs';
 import { DiskCache } from './cache.mjs';
 import { searchAll } from './aggregate.mjs';
 
-export const VERSION = '1.0.0';
+// 版本号统一从 package.json 读（见 src/version.mjs）
+export { VERSION } from './version.mjs';
 
 export {
   searchAll,

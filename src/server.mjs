@@ -11,6 +11,7 @@
  * 只监听 127.0.0.1（默认），不对外暴露；API 带 CORS 头，方便被别的本地页面调用。
  */
 
+import { VERSION } from './version.mjs';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -131,7 +132,7 @@ const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见
       case '/api/health': {
         sendJson(res, 200, {
           ok: true,
-          version: options.version ?? '1.0.0',
+          version: options.version ?? VERSION,
           uptimeSec: Math.round((Date.now() - startedAt) / 1000),
           node: process.version,
           proxy: options.http?.proxy ? String(options.http.proxy.href) : null,
