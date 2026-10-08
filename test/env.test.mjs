@@ -1,4 +1,7 @@
 import test from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 
 import {
@@ -11,6 +14,8 @@ import {
   resolveHostDefault,
   resolvePortDefault,
   resolveQbitDefault,
+  parseEnvText,
+  loadEnvFile,
 } from '../src/env.mjs';
 
 /**
@@ -161,4 +166,48 @@ test('resolvePortDefault / resolveBackendDefault 的兜底值', async () => {
     assert.equal(resolveBackendDefault(), 'auto');
     assert.equal(resolveDownloadDirOverride(), null);
   });
+});
+
+test('.env：解析注释、export 前缀、引号与行内注释', () => {
+  const parsed = parseEnvText(
+    [
+      '# 整行注释',
+      '',
+      'export TORRENT_SEARCH_PORT=9000',
+      'TORRENT_SEARCH_BIND="0.0.0.0"',
+      "TORRENT_SEARCH_DOWNLOADS=./dl # 行内注释",
+      'TORRENT_SEARCH_BACKEND=builtin',
+      'BAD LINE',
+      '=nokey',
+      '1INVALID=x',
+    ].join('\n'),
+  );
+
+  assert.equal(parsed.TORRENT_SEARCH_PORT, '9000');
+  assert.equal(parsed.TORRENT_SEARCH_BIND, '0.0.0.0');
+  assert.equal(parsed.TORRENT_SEARCH_DOWNLOADS, './dl');
+  assert.equal(parsed.TORRENT_SEARCH_BACKEND, 'builtin');
+  assert.equal(Object.keys(parsed).length, 4, '非法行应被忽略');
+});
+
+test('.env：注入 process.env，但已有的环境变量优先', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-env-'));
+  fs.writeFileSync(path.join(dir, '.env'), 'TORRENT_SEARCH_PORT=9123\nTORRENT_SEARCH_BACKEND=builtin\n', 'utf8');
+
+  const env = { TORRENT_SEARCH_PORT: '8000' }; // 已显式设置
+  const applied = loadEnvFile({ cwd: dir, env, logger: () => {} });
+
+  assert.deepEqual(applied, ['TORRENT_SEARCH_BACKEND'], '只注入未设置的键');
+  assert.equal(env.TORRENT_SEARCH_PORT, '8000', '显式设置优先于 .env');
+  assert.equal(env.TORRENT_SEARCH_BACKEND, 'builtin');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('.env：没有文件时安静返回空数组', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-env-none-'));
+  const env = {};
+  assert.deepEqual(loadEnvFile({ cwd: dir, env, logger: () => {} }), []);
+  assert.deepEqual(env, {});
+  fs.rmSync(dir, { recursive: true, force: true });
 });

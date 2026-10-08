@@ -10,6 +10,7 @@
  */
 
 import fs from 'node:fs';
+import path from 'node:path';
 
 /**
  * 判断是否运行在容器里。
@@ -138,4 +139,84 @@ export function resolveBackendDefault() {
  */
 export function resolveDownloadDirOverride() {
   return envString('TORRENT_SEARCH_DOWNLOAD_DIR', null);
+}
+
+/**
+ * 解析 .env 文本成键值对。
+ *
+ * 规则与 docker compose 的 .env 保持一致（够用即可，不追求完整实现）：
+ *   - 忽略空行与 # 注释；
+ *   - 支持 `export KEY=VALUE` 前缀；
+ *   - 值两端的成对引号会被去掉（引号内的 # 不当注释）；
+ *   - 不做变量插值（${...} 原样保留）。
+ *
+ * @param {string} text
+ * @returns {Record<string, string>}
+ */
+export function parseEnvText(text) {
+  /** @type {Record<string, string>} */
+  const values = {};
+
+  for (const rawLine of String(text).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === '' || line.startsWith('#')) continue;
+
+    const withoutExport = line.startsWith('export ') ? line.slice(7).trim() : line;
+    const eq = withoutExport.indexOf('=');
+    if (eq <= 0) continue;
+
+    const key = withoutExport.slice(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+
+    let value = withoutExport.slice(eq + 1).trim();
+    const quote = value[0];
+    if ((quote === '"' || quote === "'") && value.length >= 2 && value.endsWith(quote)) {
+      value = value.slice(1, -1);
+    } else {
+      // 未加引号时，行内的 # 视为注释
+      const hash = value.indexOf(' #');
+      if (hash >= 0) value = value.slice(0, hash).trim();
+    }
+
+    values[key] = value;
+  }
+
+  return values;
+}
+
+/**
+ * 读取 .env 文件并把其中的变量注入 process.env。
+ *
+ * 为什么需要：Docker 部署走 `docker compose`，它会自动读 .env；而**本地直接跑**
+ * （`node bin/magnet-search.mjs serve`）以前完全不读，于是同一个 .env 在容器里生效、
+ * 在本地被静默忽略 —— 想改端口/下载目录时，两种跑法的行为不一致，很难排查。
+ *
+ * **已有的环境变量优先**（只填 process.env 里没有的键），这样命令行上
+ * `TORRENT_SEARCH_PORT=9000 node bin/...` 仍然能覆盖 .env。
+ *
+ * @param {{cwd?: string, file?: string, env?: NodeJS.ProcessEnv, logger?: (message: string) => void}} [options]
+ * @returns {string[]} 实际注入的键名（供测试与日志使用）
+ */
+export function loadEnvFile(options = {}) {
+  const env = options.env ?? process.env;
+  const cwd = options.cwd ?? process.cwd();
+  const file = options.file ?? path.join(cwd, '.env');
+  const logger = options.logger ?? (() => {});
+
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return []; // 没有 .env 是正常情况
+  }
+
+  const applied = [];
+  for (const [key, value] of Object.entries(parseEnvText(text))) {
+    if (env[key] !== undefined && env[key] !== '') continue; // 显式设置优先
+    env[key] = value;
+    applied.push(key);
+  }
+
+  if (applied.length > 0) logger(`已从 .env 读取 ${applied.length} 项配置：${applied.join(', ')}`);
+  return applied;
 }

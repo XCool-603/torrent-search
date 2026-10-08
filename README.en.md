@@ -455,6 +455,14 @@ example in the comments at the end of `docker-compose.yml`.
 
 ### Configuration
 
+> **Configuring the port** (highest priority first): the `--port 9000` flag → the
+> `TORRENT_SEARCH_PORT=9000` environment variable → `.env` in the project root
+> (`TORRENT_SEARCH_PORT=9000`).
+> `.env` is read by **local runs too**, matching `docker compose` behaviour; real environment
+> variables win, so ad-hoc overrides still work:
+> `TORRENT_SEARCH_PORT=9000 node bin/magnet-search.mjs serve`.
+
+
 Everything tunable lives in `.env` (created from `.env.example`):
 
 | Variable | Default | Meaning |

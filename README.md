@@ -495,6 +495,12 @@ ssh -N -L 8787:127.0.0.1:8787 user@你的服务器
 
 ### 配置
 
+> **端口怎么配**（优先级从高到低）：命令行 `--port 9000` → 环境变量 `TORRENT_SEARCH_PORT=9000` →
+> 项目根目录的 `.env`（写 `TORRENT_SEARCH_PORT=9000`）。
+> `.env` **本地直接跑也会读**，与 `docker compose` 行为一致；已有环境变量优先，
+> 所以临时覆盖仍然有效：`TORRENT_SEARCH_PORT=9000 node bin/magnet-search.mjs serve`。
+
+
 所有可调项都在 `.env`（由 `.env.example` 生成）：
 
 | 变量 | 默认 | 说明 |

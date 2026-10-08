@@ -22,6 +22,7 @@ import {
   resolveBackendDefault,
   resolveHostDefault,
   resolvePortDefault,
+  loadEnvFile,
   resolveQbitDefault,
 } from '../src/env.mjs';
 import {
@@ -37,6 +38,11 @@ import {
 import { startServer } from '../src/server.mjs';
 import { createCoverFinder } from '../src/covers.mjs';
 import { COLORS, createColorizer, renderResultsTable, renderSourceStatus } from '../src/format.mjs';
+// 本地直接跑时也读 .env（Docker 走 compose 本来就会读）——否则同一个 .env
+// 在容器里生效、在本地被静默忽略，改端口/下载目录时行为不一致。
+// 已有的环境变量优先，所以命令行上临时覆盖仍然有效。
+loadEnvFile();
+
 
 const COMMANDS = new Set(['search', 'serve', 'sources', 'check', 'download', 'downloads', 'doctor', 'help']);
 
