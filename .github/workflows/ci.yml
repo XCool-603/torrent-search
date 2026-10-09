@@ -47,6 +47,14 @@ jobs:
       - name: 校验 compose 配置与变量插值
         run: docker compose config
 
+      # 端口必须在服务器上可配：改 .env（或环境变量）即生效，不必改 compose 文件
+      - name: 端口与绑定地址可通过 .env 覆盖
+        run: |
+          out=$(TORRENT_SEARCH_PORT=9000 TORRENT_SEARCH_BIND=0.0.0.0 docker compose config)
+          echo "$out" | grep -E 'published: "9000"' || { echo "端口未被覆盖为 9000"; exit 1; }
+          echo "$out" | grep -E 'host_ip: 0\.0\.0\.0' || { echo "绑定地址未被覆盖"; exit 1; }
+          echo "✓ TORRENT_SEARCH_PORT / TORRENT_SEARCH_BIND 均可在部署时覆盖"
+
       # 记录基础镜像里已有的用户：官方 node 镜像自带 node:1000，
       # 而 Linux 宿主 id -u 通常正好是 1000 —— 这正是构建失败的原因
       - name: 基础镜像里的用户（确认 UID 冲突）
