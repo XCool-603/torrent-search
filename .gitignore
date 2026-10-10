@@ -23,3 +23,6 @@ http-out*.txt
 .idea/
 .DS_Store
 Thumbs.db
+
+# 多角色交付流程的任务目录（过程产物，不进仓库）
+.dsh-team/
