@@ -9,6 +9,10 @@ Issues and pull requests are welcome in **Chinese or English**.
 
 ## The constraints that define this project
 
+> 部署脚本（`scripts/docker.sh`、`scripts/docker.ps1`、`tools/remote-deploy.mjs`）已全部删除，
+> 部署一律用纯 `docker compose` 命令。下面若还有历史描述，以本节为准。
+
+
 These are not preferences — they are the project's identity, and `npm run lint` enforces most of them.
 
 ### 1. Zero runtime dependencies
@@ -174,7 +178,6 @@ publish) before pasting.
 
 ---
 
-## Deployment scripts
 
 **Deployment is plain `docker compose` — there are deliberately no wrapper scripts.**
 Do not add a `scripts/docker.sh`-style wrapper: it hides docker's own error messages, adds a new
@@ -185,7 +188,6 @@ image). Anything worth fixing belongs in `docker-compose.yml` (`build.args`, `he
 
 Rules that came out of real breakage:
 
-- **`.ps1` files containing non-ASCII text must be saved as UTF-8 *with* a BOM.** Windows PowerShell 5.1
   reads scripts as ANSI without a BOM, so Chinese messages get mangled and can even swallow string
   terminators into syntax errors. `.sh` files are the opposite: **never** add a BOM, it breaks the shebang.
 - **Don't treat untracked files as local modifications** when deciding whether an upgrade is safe.
