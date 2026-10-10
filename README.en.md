@@ -387,6 +387,8 @@ so it cannot be switched at runtime).
 
 ## Docker deployment
 
+> For a from-scratch server deployment (ports, firewall, tunnels, troubleshooting) see [docs/server-deploy.md](docs/server-deploy.md).
+
 ### Deploy (plain docker commands, no scripts)
 
 ```bash

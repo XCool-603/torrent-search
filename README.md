@@ -430,6 +430,8 @@ node bin/magnet-search.mjs "ubuntu" --proxy auto             # 自动探测（�
 
 ## Docker 部署
 
+> 服务器上从零部署（含端口、防火墙、隧道、排错）另见 [docs/server-deploy.md](docs/server-deploy.md)。
+
 ### 部署（纯 docker 命令，不需要任何脚本）
 
 ```bash
