@@ -171,7 +171,10 @@ test('createLimiter：串行执行且遵守最小间隔', async () => {
   ]);
 
   assert.deepEqual(order, ['a', 'b', 'c'], '应按提交顺序串行');
-  assert.ok(Date.now() - started >= 80, '三次调用至少要等两个间隔（约 80ms）');
+  // 三次调用、间隔 40ms → 理论约 80ms。但定时器会有几毫秒的提前/合并，
+  // 卡在 80 会让这条断言在快机器上偶发变红（CI 上实测拿到过 79ms）。
+  // 断言的是"确实按间隔等了"，不是精确耗时，所以留 20ms 容差。
+  assert.ok(Date.now() - started >= 60, '三次调用至少要等两个间隔（约 80ms，留容差）');
 });
 
 test('createLimiter：某个任务抛错不会卡住后续任务', async () => {
