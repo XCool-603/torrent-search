@@ -391,6 +391,16 @@ so it cannot be switched at runtime).
 
 ### Deploy (plain docker commands, no scripts)
 
+> **Directory convention**: every command below runs in the **same deployment directory** — deploy and
+> upgrade must use one directory. Examples use the clone directory `torrent-search` locally and
+> `/opt/torrent-search` on a server (your own path is fine, but **pick one and stick to it**).
+> `cd` back into it before upgrading.
+>
+> Why this matters: an earlier version had a trap where people kept rebuilding **old code** in an old
+> directory while believing they were upgrading — it showed up as "my change didn't take effect".
+> Inconsistent directories are what breeds that.
+
+
 ```bash
 git clone https://github.com/XCool-603/torrent-search.git
 cd torrent-search
@@ -454,6 +464,21 @@ provider's security group. With no authentication, put a reverse proxy with auth
 
 To route downloads through a VPN (P2P is often blocked on restricted networks), see the gluetun
 example in the comments at the end of `docker-compose.yml`.
+
+
+### Upgrading on a server
+
+Same as locally: **go back to that directory first**, then pull and rebuild.
+
+```bash
+cd /opt/torrent-search          # ← the very directory you deployed in
+git pull
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
+
+curl -s http://127.0.0.1:8787/api/health     # should report 1.3.1
+```
+
+The version in that health response is how you tell whether the update took: `1.0.0` means old code.
 
 ### Configuration
 

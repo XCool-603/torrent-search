@@ -434,6 +434,14 @@ node bin/magnet-search.mjs "ubuntu" --proxy auto             # 自动探测（�
 
 ### 部署（纯 docker 命令，不需要任何脚本）
 
+> **目录约定**：下面所有命令都在**同一个部署目录**里执行——部署和升级必须用同一个目录。
+> 本机示例用 clone 出来的 `torrent-search`，服务器示例用 `/opt/torrent-search`（换成你自己的路径也行，
+> 但**从此固定这一个**）。升级前先 `cd` 回它。
+>
+> 为什么要强调：早期版本有个坑——在**旧目录**里反复构建旧代码，却以为在更新，
+> 表现为"改了没生效"（甚至构建一直失败）。目录不统一是这类问题的温床。
+
+
 ```bash
 git clone https://github.com/XCool-603/torrent-search.git
 cd torrent-search
@@ -494,6 +502,21 @@ ssh -N -L 8787:127.0.0.1:8787 user@你的服务器
 和云厂商的安全组。没有鉴权时，建议再套一层反向代理做认证。
 
 想让下载走 VPN 出口（受限网络下 BT 常被拦），见 `docker-compose.yml` 末尾的 gluetun 示例注释。
+
+
+### 服务器上升级
+
+和本机一样：**先回到那个目录**，再拉代码重建。
+
+```bash
+cd /opt/torrent-search          # ← 就是上面部署时用的那个目录
+git pull
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
+
+curl -s http://127.0.0.1:8787/api/health     # 应报 1.3.1
+```
+
+健康检查报的版本号就是判断"更新成功没有"的依据：报 `1.0.0` 说明还是旧代码。
 
 ### 配置
 
