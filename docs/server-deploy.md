@@ -453,3 +453,30 @@ node bin/magnet-search.mjs serve
 其中 compose 相关路径由 CI 的 `docker-verify` job 真实覆盖（`.github/workflows/ci.yml`）：
 `docker compose config`、端口与绑定地址可被 `.env` 覆盖（断言 `published: "9000"` 与 `host_ip: 0.0.0.0`）、
 三种 UID/GID 场景下真实构建镜像、非 root 运行、下载目录可写、容器启动并通过 `/api/health`。
+
+---
+
+## 容器名与 `docker compose exec`
+
+本项目的 `docker-compose.yml` **刻意不设 `container_name`**。原因：固定容器名会关掉 Compose 的
+项目名前缀（`<项目名>-<服务名>-1`），于是同一台机器上从两个目录部署同一份 compose 就会撞名，
+报 `Conflict. The container name "/torrent-search" is already in use`——而且那个名字可能属于
+**完全无关的另一个项目**。
+
+需要用容器时**按服务名引用**，Compose 会自己解析到实际容器，不必知道容器全名：
+
+```bash
+docker compose exec torrent-search node bin/magnet-search.mjs doctor   # 容器内诊断
+docker compose exec torrent-search sh                                  # 进容器
+docker compose logs -f torrent-search                                  # 看某个服务的日志
+```
+
+排查撞名时先确认那个容器是谁的，**不要照着报错改自己的 compose**：
+
+```bash
+docker ps -a --filter name=torrent-search --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+docker inspect <名字> --format '{{ index .Config.Labels "com.docker.compose.project" }} ← {{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
+```
+
+第二条输出的 `working_dir` 会告诉你它属于哪个目录的项目。如果指向别的项目，就不是你的问题；
+确实要腾名字，用 `docker rename <旧名> <新名>`（**不要**直接 `docker rm -f`，可能打断别的应用、还会丢匿名卷）。

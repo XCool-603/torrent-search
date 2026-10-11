@@ -13,6 +13,8 @@
 *.xml text eol=lf
 Dockerfile text eol=lf
 .dockerignore text eol=lf
+# 值必须精确的配置样例也钉 LF：CRLF 会让 `cut -d= -f2-` 之类的取值多出一个 \r
+.env.example text eol=lf
 .gitignore text eol=lf
 .gitattributes text eol=lf
 LICENSE text eol=lf

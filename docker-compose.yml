@@ -24,7 +24,10 @@ services:
         APP_UID: ${APP_UID:-10001}
         APP_GID: ${APP_GID:-10001}
     image: torrent-search:local
-    container_name: torrent-search
+    # 刻意**不设** container_name：固定名字会关掉 Compose 的项目名前缀，
+    # 同一台机器上从两个目录部署就会撞名，而且报错里的名字可能属于别的项目。
+    # 需要用容器时按**服务名**引用即可（Compose 会自己解析）：
+    #   docker compose exec torrent-search node bin/magnet-search.mjs doctor
 
     # 让 PID 1 正确处理 SIGTERM（docker stop 能优雅退出，等价于 tini）
     init: true
