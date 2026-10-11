@@ -62,7 +62,21 @@ jobs:
           docker run --rm node:22-alpine sh -c 'echo "--- passwd ---"; tail -n 3 /etc/passwd; echo "--- group ---"; tail -n 3 /etc/group'
 
       - name: 构建镜像（默认 UID）
-        run: docker build --progress=plain -t torrent-search:verify .
+        run: |
+          # 把版本与提交打进 OCI 标签，之后 docker inspect 就能看出这是哪份代码
+          docker build --progress=plain \
+            --build-arg APP_VERSION="$(node -p "require('./package.json').version")" \
+            --build-arg GIT_REVISION="$(git rev-parse --short HEAD)" \
+            -t torrent-search:verify .
+
+      - name: 镜像带有可核对的版本与提交标签
+        run: |
+          ver=$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' torrent-search:verify)
+          rev=$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' torrent-search:verify)
+          echo "label version=$ver revision=$rev"
+          test "$ver" = "$(node -p "require('./package.json').version")" || { echo "版本标签与 package.json 不一致"; exit 1; }
+          test "$rev" != "unknown" || { echo "提交标签没传进来"; exit 1; }
+          echo "✓ docker inspect 能看出镜像对应的代码版本"
 
       # 宿主 UID=1000 时与基础镜像自带的 node 用户冲突：
       # 早期 Dockerfile 直接 adduser -u 1000 会在这里构建失败

@@ -35,7 +35,22 @@ RUN set -eux; \
     # 运行期要写的目录：-h 之外还得真建出来，否则写缓存会失败且报错位置离根因很远。
     # 用 chown 数字 ID，不用 install -d -o <用户名>——复用已有用户时名字不是 app。
     mkdir -p /downloads /home/app/.cache; \
-    chown "${APP_UID}:${APP_GID}" /downloads /home/app/.cache
+    chown "${APP_UID}:${APP_GID}" /downloads /home/app/.cache; \
+    # 构建期自检（docker skill 1.8 附带一条）：属主配错在这里就炸，
+    # 而不是等容器起来写文件时报 EACCES——那时报错位置离根因很远。
+    test "$(stat -c '%u:%g' /downloads)" = "${APP_UID}:${APP_GID}"; \
+    test "$(stat -c '%u:%g' /home/app/.cache)" = "${APP_UID}:${APP_GID}"
+
+# OCI 标签：让 `docker inspect` 能直接回答"这个镜像到底是哪份代码构建的"。
+# 真实踩过：用户反复构建旧代码，而镜像本身看不出新旧，只能靠猜。
+# 版本号从 package.json 读（src/version.mjs 同一个来源），提交号由 CI 传入。
+ARG APP_VERSION=unknown
+ARG GIT_REVISION=unknown
+LABEL org.opencontainers.image.title="torrent-search" \
+      org.opencontainers.image.description="零依赖磁力/BT 聚合搜索工具" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_REVISION}" \
+      org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app
 

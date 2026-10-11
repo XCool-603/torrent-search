@@ -480,3 +480,28 @@ docker inspect <名字> --format '{{ index .Config.Labels "com.docker.compose.pr
 
 第二条输出的 `working_dir` 会告诉你它属于哪个目录的项目。如果指向别的项目，就不是你的问题；
 确实要腾名字，用 `docker rename <旧名> <新名>`（**不要**直接 `docker rm -f`，可能打断别的应用、还会丢匿名卷）。
+
+---
+
+## 核对"我跑的是哪一版"
+
+镜像带 OCI 标签，构建时会把版本与提交写进去（CI 构建时会自动传）：
+
+```bash
+# 镜像标签：这份镜像由哪个版本/提交构建
+docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }} / {{ index .Config.Labels "org.opencontainers.image.revision" }}' torrent-search:local
+
+# 应用自报：最权威（版本号从 package.json 读，不是硬编码）
+curl -s http://127.0.0.1:8787/api/health
+```
+
+用 `docker compose up -d --build` 自己构建时，标签默认是 `unknown`——想要它有意义就显式传：
+
+```bash
+APP_VERSION=$(node -p "require('./package.json').version") \
+GIT_REVISION=$(git rev-parse --short HEAD) \
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
+```
+
+> 为什么要这个：真实踩过一次——用户反复构建**旧代码**，而镜像本身看不出新旧，
+> 只能靠猜；应用自报的 `/api/health` 也因此从硬编码 1.0.0 改成了读 package.json。
