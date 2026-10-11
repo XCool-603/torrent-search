@@ -451,7 +451,11 @@ const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见
 
       // 竞态：等待分片期间下载刚好完成，会话被清掉，isAlive 立刻为假。
       // 此时文件已经完整，应当改从磁盘服务，而不是让播放器拿到 503 去重试。
-      if (task.status === 'done' && (await serveFromDisk({ requireExactSize: true }))) return;
+      //
+      // 判据刻意**只看文件是否完整**（serveFromDisk 的 requireExactSize），不看 task.status：
+      // 会话被清掉与状态翻成 done 之间有时序差，用状态判断会在那一段窗口里漏掉
+      // （CI 上 Node 24 / windows 实测复现过 503）。
+      if (await serveFromDisk({ requireExactSize: true })) return;
 
       sendJson(res, 503, {
         error: { code: 'data_not_ready', message: error?.message ?? String(error) },
