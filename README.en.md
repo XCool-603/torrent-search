@@ -22,7 +22,7 @@ node bin/magnet-search.mjs serve          # then open http://127.0.0.1:8787
 - **Zero dependencies** — no `npm install`, no build step. Node ≥ 20 runs it as-is.
 - **Proxy support** — `--proxy 127.0.0.1:7897`, or `--proxy auto` (reads the system proxy; on Windows it reads the registry).
 - **Three ways to use it** — CLI (pipeable, scriptable), web UI (visual), JSON API (callable from other programs).
-- **Verifiable** — 232 offline tests (with real captured fixtures) + a live smoke test + a project self-check (`npm run lint`).
+- **Verifiable** — 287 offline tests (with real captured fixtures) + a live smoke test + a project self-check (`npm run lint`).
 
 ## Quick start
 
@@ -475,7 +475,7 @@ cd /opt/torrent-search          # ← the very directory you deployed in
 git pull
 APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
 
-curl -s http://127.0.0.1:8787/api/health     # should report 1.3.1
+curl -s http://127.0.0.1:8787/api/health     # should equal the version in package.json
 ```
 
 The version in that health response is how you tell whether the update took: `1.0.0` means old code.
@@ -556,7 +556,7 @@ cannot see the host's TUN device from inside a container (it says so explicitly 
 ## Tests
 
 ```bash
-npm test           # 232 offline tests: parsing, aggregation, filtering, cache, HTTP, server, BT engine, download manager
+npm test           # 287 offline tests: parsing, aggregation, filtering, cache, HTTP, server, BT engine, download manager
 npm run lint       # project self-check: full syntax check + conventions (zero deps / no XSS APIs / adapter contracts)
 npm run smoke      # live smoke test: real requests to every online source, verifying field consistency
 npm run fixtures   # re-capture test fixtures (run after a site redesign)

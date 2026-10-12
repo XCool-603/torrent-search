@@ -23,6 +23,12 @@ services:
       args:
         APP_UID: ${APP_UID:-10001}
         APP_GID: ${APP_GID:-10001}
+        # OCI 标签用的版本与提交。Compose **只转发 build.args 里列出的键**，
+        # 所以想让 docker inspect 看到真实版本，必须在这里声明（并在构建时传入）：
+        #   APP_VERSION=$(node -p "require('./package.json').version") \
+        #   GIT_REVISION=$(git rev-parse --short HEAD) docker compose up -d --build
+        APP_VERSION: ${APP_VERSION:-unknown}
+        GIT_REVISION: ${GIT_REVISION:-unknown}
     image: torrent-search:local
     # 刻意**不设** container_name：固定名字会关掉 Compose 的项目名前缀，
     # 同一台机器上从两个目录部署就会撞名，而且报错里的名字可能属于别的项目。

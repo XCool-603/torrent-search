@@ -1,8 +1,8 @@
-# 服务器部署与端口配置（torrent-search v1.3.0）
+# 服务器部署与端口配置（torrent-search）
 
 > **读者**：刚 `git clone` 完仓库、要在**一台 Linux 服务器**上把它跑起来的人。
 > **目标**：照着抄命令就能跑起来，并且知道**端口 / 绑定地址 / 防火墙 / 安全组**怎么改、怎么验证。
-> **适用版本**：v1.3.0（`package.json` 里的 `version`）。
+> **适用版本**：以 `package.json` 里的 `version` 为准（本文档不写死版本号；自查命令见第 9 节）。
 
 ---
 
@@ -310,21 +310,33 @@ curl -fsS http://127.0.0.1:9000/api/health
 
 ---
 
-## 9. 版本核对：确认跑起来的确实是 v1.3.0
+## 9. 版本核对：确认跑起来的确实是 `package.json` 里那一版
 
-这是 v1.3.0 特意补上的能力：版本号**从 `package.json` 读取**（`src/version.mjs`），
+### 先自查：本仓库现在的版本是多少
+
+```bash
+# 唯一权威来源：源码版本、镜像标签、下面所有期望值都以它为准
+node -p "require('./package.json').version"
+
+# 跑起来的那一份自报了什么（端口按你实际的改）
+curl -fsS http://127.0.0.1:8787/api/health | grep -o '"version": *"[^"]*"'
+```
+
+**下面出现的版本号一律以这两条命令的输出为准；本文档不承诺某个固定版本。**
+
+版本号**从 `package.json` 读取**（`src/version.mjs`），
 不再硬编码在源码里，所以 `/api/health` 返回的版本是真实版本，可以用来判断"我到底跑的是哪一版"。
 
 ```bash
 curl -fsS http://127.0.0.1:8787/api/health
 ```
 
-期望输出（节选）：
+期望输出（节选，`version` 的值 = 上面 `node -p "require('./package.json').version"` 的输出）：
 
 ```json
 {
   "ok": true,
-  "version": "1.3.0",
+  "version": "<package.json 里的 version>",
   "uptimeSec": 15,
   "node": "v22.x.x",
   "proxy": null,
@@ -335,14 +347,14 @@ curl -fsS http://127.0.0.1:8787/api/health
 
 - 端口改成 9000 就换成 `http://127.0.0.1:9000/api/health`；
 - 走 SSH 隧道时，在你**本地**跑同样的 `curl` 即可；
-- 关注 `version` 字段：不是 `1.3.0` 就说明镜像/代码是旧的（见下面的排查）。
+- 关注 `version` 字段：**不等于 `package.json` 里的版本**就说明镜像/代码是旧的（见下面的排查）。
 
 **容器内**核对（`node:22-alpine` 里**没有 `curl`**，所以用 `node`）：
 
 ```bash
 # CLI 自己报的版本
 docker compose exec torrent-search node bin/magnet-search.mjs --version
-# → 1.3.0
+# → 与上面 node -p "require('./package.json').version" 的输出一致
 
 # 容器内打健康检查（等价于镜像 HEALTHCHECK 的做法）
 docker compose exec torrent-search node -e "fetch('http://127.0.0.1:8787/api/health').then(r=>r.text()).then(t=>console.log(t))"
@@ -408,7 +420,7 @@ node bin/magnet-search.mjs serve
 | `docker compose ps` 显示 `unhealthy` | 应用没起来 | `docker compose logs --tail=100`；`docker compose exec torrent-search node bin/magnet-search.mjs doctor` |
 | 服务器本机 `curl` 通，外面连不上 | 两道门没开全，或 `BIND` 还是 `127.0.0.1` | 第 7 节：宿主防火墙 **和** 云安全组都要放行；`ss -lntp \| grep <端口>` 确认绑的是 `0.0.0.0` |
 | `ss -lntp` 里根本没有该端口 | 容器没起来 / 端口映射写错 | `docker compose ps`、`docker compose config \| grep -A3 ports` |
-| `/api/health` 里的 `version` 不是 1.3.0 | 没拉新代码就 build | `git pull` 后 `docker compose up -d --build` |
+| `/api/health` 里的 `version` 与 `package.json` 里的版本不一致 | 没拉新代码就 build | `git pull` 后 `docker compose up -d --build` |
 | 改 `.env` 里的自定义变量，容器里看不到 | compose 没引用该变量 | 在 `docker-compose.yml` 的 `environment:` 里加 `KEY: ${KEY:-}`（见第 2 节） |
 | 容器里连不上宿主机的 qBittorrent | 容器里的 `127.0.0.1` 指容器自己 | 用 `http://host.docker.internal:8080`（compose 已配好 `extra_hosts`） |
 | BT 下载完全没速度 | 网络封锁 P2P（代理/TUN 拦截） | 在**宿主机**上排查；或按 `docker-compose.yml` 末尾的注释，让容器走 gluetun 之类的 VPN 出口 |
@@ -441,8 +453,8 @@ node bin/magnet-search.mjs serve
 
 | 命令 | 结果 |
 | --- | --- |
-| `node bin/magnet-search.mjs --version` | 输出 `1.3.0` |
-| 临时目录放 `.env`（`TORRENT_SEARCH_PORT=9123`）后 `node bin/magnet-search.mjs serve` | 实际监听 `127.0.0.1:9123`，`curl http://127.0.0.1:9123/api/health` 返回 `"version": "1.3.0"` —— 证明**本地直接跑会读 `.env`**，且版本来自 `package.json` |
+| `node bin/magnet-search.mjs --version` | 输出与 `node -p "require('./package.json').version"` 一致 |
+| 临时目录放 `.env`（`TORRENT_SEARCH_PORT=9123`）后 `node bin/magnet-search.mjs serve` | 实际监听 `127.0.0.1:9123`，`curl http://127.0.0.1:9123/api/health` 返回的 `"version"` 与 `node -p "require('./package.json').version"` 一致 —— 证明**本地直接跑会读 `.env`**，且版本来自 `package.json` |
 | `TORRENT_SEARCH_PORT=9124 node ... serve`（`.env` 里是 9123） | 实际监听 9124 —— 证明**环境变量优先于 `.env`** |
 | `node ... serve --port 9125`（`.env` 里是 9123） | 实际监听 9125 —— 证明**命令行 `--port` 优先级最高** |
 | `git ls-files` 过滤 `scripts/`、`remote-deploy` | 不存在 `scripts/docker.sh`、`scripts/docker.ps1`、`tools/remote-deploy.mjs`（只有 `skills/torrent-search/scripts/torrent-search.mjs`，与本项目部署无关） |

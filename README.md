@@ -23,7 +23,7 @@ node bin/magnet-search.mjs serve          # 然后打开 http://127.0.0.1:8787
 - **零依赖**：不需要 `npm install`，不需要构建步骤，Node ≥ 20 直接跑。
 - **代理支持**：`--proxy 127.0.0.1:7897` 或 `--proxy auto`（自动读系统代理，Windows 下会读注册表）。
 - **三种用法**：CLI（可管道/可脚本化）、Web UI（可视化）、JSON API（可被其它程序调用）。
-- **可验证**：232 个离线单元测试（真实响应夹具）+ 实网冒烟测试 + 项目自检（`npm run lint`）。
+- **可验证**：287 个离线单元测试（真实响应夹具）+ 实网冒烟测试 + 项目自检（`npm run lint`）。
 
 ---
 
@@ -513,7 +513,7 @@ cd /opt/torrent-search          # ← 就是上面部署时用的那个目录
 git pull
 APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
 
-curl -s http://127.0.0.1:8787/api/health     # 应报 1.3.1
+curl -s http://127.0.0.1:8787/api/health     # 应等于 package.json 里的版本
 ```
 
 健康检查报的版本号就是判断"更新成功没有"的依据：报 `1.0.0` 说明还是旧代码。
@@ -590,7 +590,7 @@ qBittorrent 要用 `host.docker.internal`、容器里 `doctor` 看不到宿主�
 ## 测试
 
 ```bash
-npm test           # 232 个离线单元测试：解析、聚合、过滤、缓存、HTTP、服务、BT 引擎、下载管理
+npm test           # 287 个离线单元测试：解析、聚合、过滤、缓存、HTTP、服务、BT 引擎、下载管理
 npm run lint       # 项目自检：全量语法检查 + 零依赖/无 XSS API/适配器契约等约定检查
 npm run smoke      # 实网冒烟：对每个在线源发真实请求并校验字段自洽性
 npm run fixtures   # 重新抓取测试夹具（站点改版后跑一次）

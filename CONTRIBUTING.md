@@ -69,7 +69,7 @@ git clone https://github.com/XCool-603/torrent-search.git
 cd torrent-search
 node --version        # must be >= 20
 
-npm test              # 232 offline tests
+npm test              # 287 offline tests
 npm run lint          # syntax + project conventions
 npm run check         # per-source connectivity (needs network)
 npm run smoke         # live end-to-end smoke test (needs network)
