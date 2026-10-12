@@ -352,7 +352,7 @@ Browsers often send `Range: bytes=0-` (the whole file). For an in-progress task 
 
 Known limitation: **for a multi-file torrent whose target file is not at the start, playback has to
 wait for the preceding pieces**. The engine downloads pieces in ascending order (naturally sequential
-for single-file torrents) and does not support "prioritise one file" yet.
+for single-file torrents) and does not support "prioritise one file" yet\n
 ### Using it as a library
 
 ```js
