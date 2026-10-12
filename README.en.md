@@ -347,7 +347,8 @@ Browsers often send `Range: bytes=0-` (the whole file). For an in-progress task 
 |---|---|---|
 | Downloading | Engine session (verified pieces) | Progressive; waits when data has not arrived |
 | Completed | Disk file stream | Reads the file by `Range`, lowest memory |
-| qBittorrent backend | — | Returns `409`: the data lives in qBittorrent, no piece bitmap available |
+| qBittorrent backend (downloading) | — | Returns `409`: the data lives in qBittorrent, no piece bitmap available |
+| qBittorrent backend (completed) | Disk file stream | Data already landed in the download dir; read by `Range` |
 | Stopped/failed | — | Returns `409`: the piece bitmap was released with the session |
 
 Known limitation: **for a multi-file torrent whose target file is not at the start, playback has to
