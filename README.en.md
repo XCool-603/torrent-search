@@ -26,6 +26,8 @@ node bin/magnet-search.mjs serve          # then open http://127.0.0.1:8787
 
 ## Quick start
 
+Requires Node.js ≥ 20 (developed and verified on Node 26.8.1).
+
 ```bash
 # 1) Aggregate search
 node bin/magnet-search.mjs "ubuntu 24.04"
@@ -320,8 +322,37 @@ that enter the viewport**, applied progressively in small batches.
   - `GET /api/downloads` — task list (includes `dir`, `backend`, `qbit:{ok,version}`)
   - `GET /api/downloads/:id` — one task; `DELETE /api/downloads/:id?deleteFiles=1` — cancel and delete
   - `GET /api/downloads/stream` — SSE progress stream
+- Progressive playback (`<video>` plays directly):
+  - `GET /api/stream/<infoHash>` — file listing: `{infoHash, name, totalBytes, pieceLength, pieceCount,
+    piecesDone, complete, files:[{index, path, length, contentType, url}]}`
+  - `GET /api/stream/<infoHash>/<fileIndex>` — file bytes, supports `Range` (206 + `Content-Range`);
+    200 without a `Range` header; `HEAD` returns headers only without waiting for data; out-of-range → 416
 - Errors are uniform: `{"error":{"code":"bad_request","message":"..."}}`
 
+#### How progressive playback works
+
+Only **verified, on-disk** pieces are served — the file on disk is pre-allocated to the torrent's
+length, so its size tells you nothing about validity; the only trustworthy source is the piece
+bitmap (a piece is marked done only after its SHA1 check passes).
+
+If the requested bytes have not arrived yet, the endpoint **waits** (30 seconds by default), so
+"add a task and hit play" still works; on timeout it returns `503 data_not_ready` and the player
+retries later.
+
+Browsers often send `Range: bytes=0-` (the whole file). For an in-progress task the response is the
+**currently contiguous ready range** (capped at 8 MiB per response) rather than the whole file, with
+`Content-Range` reporting the actual range so the player can request the rest.
+
+| Task state | Data source | Notes |
+|---|---|---|
+| Downloading | Engine session (verified pieces) | Progressive; waits when data has not arrived |
+| Completed | Disk file stream | Reads the file by `Range`, lowest memory |
+| qBittorrent backend | — | Returns `409`: the data lives in qBittorrent, no piece bitmap available |
+| Stopped/failed | — | Returns `409`: the piece bitmap was released with the session |
+
+Known limitation: **for a multi-file torrent whose target file is not at the start, playback has to
+wait for the preceding pieces**. The engine downloads pieces in ascending order (naturally sequential
+for single-file torrents) and does not support "prioritise one file" yet.
 ### Using it as a library
 
 ```js
@@ -559,6 +590,7 @@ cannot see the host's TUN device from inside a container (it says so explicitly 
 npm test           # 287 offline tests: parsing, aggregation, filtering, cache, HTTP, server, BT engine, download manager
 npm run lint       # project self-check: full syntax check + conventions (zero deps / no XSS APIs / adapter contracts)
 npm run smoke      # live smoke test: real requests to every online source, verifying field consistency
+npm run screenshots # regenerate the Web UI screenshots in the README (headless Edge/Chrome, zero deps)
 npm run fixtures   # re-capture test fixtures (run after a site redesign)
 npm run check      # per-source connectivity self-check
 ```
