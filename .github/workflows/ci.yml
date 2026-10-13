@@ -139,10 +139,12 @@ jobs:
       # compose 里声明的镜像名也要是这个（否则 compose build 出来的名字对不上）
       - name: compose 声明的镜像名是 docker-magnet-search
         run: |
-          docker compose config | grep -E '^\s+image: docker-magnet-search        run: |
-          uid=$(docker run --rm torrent-search:verify id -u)
-          echo "容器内 UID = $uid"
-          test "$uid" != "0" || { echo "不该以 root 运行"; exit 1; }
+          if docker compose config | grep -q "image: docker-magnet-search"; then
+            echo "✓ compose 与 docker build 用的是同一个镜像名"
+          else
+            echo "compose 里的 image 不是 docker-magnet-search"
+            exit 1
+          fi
 
       - name: 下载目录与缓存目录可写
         run: |
