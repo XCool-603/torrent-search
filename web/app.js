@@ -362,7 +362,17 @@ function friendlyError(error) {
 /* 视图切换                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 门户形态：落地页（landing）展开 hero，一旦开始搜索就收紧 hero（results），
+ * 让结果区尽量靠上。具体样式在 index.html 的门户样式块里（body[data-view=…]）。
+ */
+function syncPortalMode(view) {
+  const mode = view === 'empty' ? 'landing' : 'results';
+  if (document.body.dataset.view !== mode) document.body.dataset.view = mode;
+}
+
 function setView(view) {
+  syncPortalMode(view);
   if (dom.emptyState) dom.emptyState.hidden = view !== 'empty';
   if (dom.loading) dom.loading.hidden = view !== 'loading';
   if (dom.noResults) dom.noResults.hidden = view !== 'noresults';
@@ -641,8 +651,8 @@ async function checkHealth() {
         dom.downloadsBadge.textContent = String(Math.trunc(active));
         dom.downloadsBadge.hidden = false;
       }
-      // 能力变化后刷新结果行上的「下载」按钮状态
-      if (wasEnabled === null && state.hasResults) renderRows();
+      // 能力变化后同步结果行上的「下载」按钮状态（就地改属性，不重渲染整表）
+      if (wasEnabled === null && state.hasResults) syncDownloadButtons();
     }
 
     setServiceStatus('ok', parts.join(' · '));
@@ -915,6 +925,12 @@ function renderResults(data, query) {
 let renderGeneration = 0;
 /** 每块插入的行数：首块立即渲染，其余分帧补上。 */
 const ROW_CHUNK_SIZE = 24;
+/**
+ * 结果行上的「下载」按钮登记表（{ button, magnet }）。
+ * 下载能力（/api/health 的 downloads.enabled）可能比结果晚到，登记表让这种变化
+ * 只更新按钮本身，不必把整张结果表重渲染一遍——那会多付一次完整布局。
+ */
+let downloadButtons = [];
 
 /** 把回调排到空闲时间（不支持 requestIdleCallback 时退化为下一帧）。 */
 function scheduleIdle(callback) {
@@ -932,6 +948,7 @@ function renderRows() {
   // 排序完全由后端全局完成，这里保持响应顺序
   const list = Array.isArray(state.lastResults) ? state.lastResults.slice() : [];
   clear(dom.resultsBody);
+  downloadButtons = [];
   resetCoverWork();
 
   // 先把行建好再插入。脱离文档的节点不触发布局，构建本身很便宜；
@@ -955,6 +972,28 @@ function renderRows() {
   insertChunk(0);
 
   if (state.query) dom.resultsTable.setAttribute('aria-label', '“' + state.query + '”的搜索结果');
+}
+
+/**
+ * 就地同步结果行上「下载」按钮的可用状态。
+ * 用在下载能力晚于结果到达时（/api/health 的回包）：只改按钮属性，不重建行。
+ */
+function syncDownloadButtons() {
+  const downloadsOff = state.downloads.enabled === false;
+  for (const entry of downloadButtons) {
+    const button = entry.button;
+    if (!button || !button.isConnected) continue;
+    const hasMagnet = Boolean(asString(entry.magnet));
+    const off = !hasMagnet || downloadsOff;
+    button.disabled = off;
+    if (off) button.setAttribute('aria-disabled', 'true');
+    else button.removeAttribute('aria-disabled');
+    button.title = !hasMagnet
+      ? '该结果没有磁力链接'
+      : downloadsOff
+        ? '后端未启用下载功能'
+        : '在服务端创建 BT 下载任务';
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1252,9 +1291,11 @@ function buildResultRow(item, keywords) {
     if (!magnet || downloadsDisabled) {
       downloadBtn.disabled = true;
       downloadBtn.setAttribute('aria-disabled', 'true');
-    } else {
-      downloadBtn.addEventListener('click', () => addDownload(magnet, downloadBtn));
     }
+    // 监听器始终挂上（有磁力链接时）：下载能力是异步到的，能力为 false 时
+    // addDownload 自己会给出提示；这样能力晚到只需就地同步按钮，不必重建整张结果表。
+    if (magnet) downloadBtn.addEventListener('click', () => addDownload(magnet, downloadBtn));
+    downloadButtons.push({ button: downloadBtn, magnet });
     actions.appendChild(downloadBtn);
 
     if (torrentUrl) {
@@ -1526,10 +1567,16 @@ function updateDownloadsBadge() {
 }
 
 function renderDownloadsDir() {
-  if (!dom.downloadsDir) return;
   const dir = asString(state.downloads.dir);
-  dom.downloadsDir.textContent = dir ? '保存到：' + dir : '';
-  dom.downloadsDir.setAttribute('title', dir ? '服务端默认下载目录：' + dir : '服务端默认下载目录');
+  if (dom.downloadsDir) {
+    dom.downloadsDir.textContent = dir ? '保存到：' + dir : '';
+    dom.downloadsDir.setAttribute('title', dir ? '服务端默认下载目录：' + dir : '服务端默认下载目录');
+  }
+  // 门户 hero 同步显示保存位置：点「打开下载任务」之前就知道文件会落在哪
+  if (dom.heroDownloadDir) {
+    dom.heroDownloadDir.textContent = dir ? '下载保存到 ' + dir : '';
+    dom.heroDownloadDir.setAttribute('title', dir ? '服务端默认下载目录：' + dir : '');
+  }
 }
 
 function renderDownloadsEmpty() {
@@ -1861,6 +1908,15 @@ async function loadDownloads() {
   }
 }
 
+/** 用户是否要求减少动效（prefers-reduced-motion: reduce）。 */
+function prefersReducedMotion() {
+  try {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
+
 function openDownloadsPanel() {
   if (!dom.downloadsPanel) return;
   state.downloads.open = true;
@@ -1872,11 +1928,21 @@ function openDownloadsPanel() {
   connectDownloadsStream();
   if (dom.downloadsPanel.scrollIntoView) {
     try {
-      dom.downloadsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // 减少动效时不做平滑滚动（滚动动画同样是动效）
+      dom.downloadsPanel.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
     } catch {
       /* 忽略 */
     }
   }
+}
+
+/** 门户 hero 的「打开下载任务」入口：后端没开下载能力时给出明确提示。 */
+function openDownloadsFromPortal() {
+  if (state.downloads.enabled === false) {
+    showAlert('error', '后端未启用下载功能（启动 serve 时没有下载管理器），无法创建下载任务。');
+    return;
+  }
+  openDownloadsPanel();
 }
 
 function closeDownloadsPanel() {
@@ -1979,20 +2045,34 @@ async function retryDownload(id, button) {
 /* 事件绑定与初始化                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 存过非默认过滤条件时自动展开「高级选项」：
+ * 落地页默认折叠高级选项，但正在生效的过滤条件必须让用户看得见，否则结果变少会莫名其妙。
+ */
+function revealAdvancedIfFiltered() {
+  if (!dom.portalAdvanced) return;
+  const filters = state.filters;
+  const nonDefault = filters.minSeeders > 0 || asString(filters.exclude).trim() !== '' || filters.safe === true;
+  if (nonDefault) dom.portalAdvanced.open = true;
+}
+
+/** 示例关键词同时填到门户 hero 和结果区空状态里（两个容器共用同一份词表）。 */
 function renderExamples() {
-  if (!dom.examples) return;
-  clear(dom.examples);
-  for (const keyword of EXAMPLE_KEYWORDS) {
-    const btn = el('button', {
-      class: 'btn tiny',
-      text: keyword,
-      attrs: { type: 'button', title: '搜索 ' + keyword, 'aria-label': '搜索示例关键词 ' + keyword },
-    });
-    btn.addEventListener('click', () => {
-      if (dom.searchInput) dom.searchInput.value = keyword;
-      runSearch({ query: keyword, page: 1 });
-    });
-    dom.examples.appendChild(btn);
+  for (const container of [dom.heroExamples, dom.examples]) {
+    if (!container) continue;
+    clear(container);
+    for (const keyword of EXAMPLE_KEYWORDS) {
+      const btn = el('button', {
+        class: 'btn tiny',
+        text: keyword,
+        attrs: { type: 'button', title: '搜索 ' + keyword, 'aria-label': '搜索示例关键词 ' + keyword },
+      });
+      btn.addEventListener('click', () => {
+        if (dom.searchInput) dom.searchInput.value = keyword;
+        runSearch({ query: keyword, page: 1 });
+      });
+      container.appendChild(btn);
+    }
   }
 }
 
@@ -2091,6 +2171,9 @@ function bindEvents() {
   if (dom.downloadsToggle) dom.downloadsToggle.addEventListener('click', toggleDownloadsPanel);
   if (dom.downloadsRefresh) dom.downloadsRefresh.addEventListener('click', loadDownloads);
 
+  // 门户 hero 的下载入口（落地页明确的下载引导）
+  if (dom.heroDownloads) dom.heroDownloads.addEventListener('click', openDownloadsFromPortal);
+
   if (dom.prevPage) {
     dom.prevPage.addEventListener('click', () => {
       if (state.page > 1) runSearch({ query: state.query, page: state.page - 1 });
@@ -2152,6 +2235,10 @@ function cacheDom() {
   dom.prevPage = $('prev-page');
   dom.nextPage = $('next-page');
   dom.examples = $('examples');
+  dom.heroExamples = $('hero-examples');
+  dom.heroDownloads = $('hero-downloads');
+  dom.heroDownloadDir = $('hero-download-dir');
+  dom.portalAdvanced = $('portal-advanced');
   dom.toast = $('toast');
   dom.serviceDot = $('service-dot');
   dom.serviceText = $('service-text');
@@ -2175,7 +2262,25 @@ function urlQuery() {
   }
 }
 
+/**
+ * 把回调排到「首帧已经画出来之后」执行。
+ *
+ * 为什么是双 rAF：第一个 rAF 回调仍在首帧的渲染步骤**之前**跑，在它里面改 DOM
+ * 照样会并进首屏那一次样式计算/布局；只有第二个 rAF 才落在首帧提交之后，
+ * 它的 DOM 变更会另起一个任务。没有 rAF 时退化为一个定时器。
+ */
+function afterFirstPaint(callback) {
+  if (typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => callback());
+    });
+    return;
+  }
+  window.setTimeout(callback, 32);
+}
+
 async function init() {
+  // —— 首屏关键路径：只做「不碰布局就出不了画面」的事 ——
   cacheDom();
   restorePrefs();
   renderExamples();
@@ -2184,16 +2289,21 @@ async function init() {
   setView('empty');
   setLoading(false);
 
-  // 先加载数据源（搜索时要用到勾选状态），失败也不阻塞搜索
-  await loadSources();
-
   const initialQuery = urlQuery().trim();
-  if (initialQuery) {
-    if (dom.searchInput) dom.searchInput.value = initialQuery;
-    await runSearch({ query: initialQuery, page: 1, updateUrl: false });
-  }
+  if (initialQuery && dom.searchInput) dom.searchInput.value = initialQuery;
 
-  checkHealth();
+  // —— 首帧之后：接口请求、数据源列表构建、按需展开高级选项 ——
+  // 这些都会改 DOM 或等网络，放在首帧前只会和第一次样式计算/布局挤在同一个任务里，
+  // 把首屏任务拖长。挪到首帧之后，首屏只剩浏览器本来就要做的那一次布局。
+  afterFirstPaint(() => {
+    // 数据源先于搜索加载（搜索要用勾选状态），但不阻塞首帧；
+    // 加载失败或还没加载完时 currentSourceParam() 返回 null，后端用默认源，搜索照常可用。
+    loadSources().then(() => {
+      if (initialQuery) runSearch({ query: initialQuery, page: 1, updateUrl: false });
+    });
+    checkHealth();
+    revealAdvancedIfFiltered();
+  });
 }
 
 if (document.readyState === 'loading') {

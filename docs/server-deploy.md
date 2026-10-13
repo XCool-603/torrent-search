@@ -520,3 +520,73 @@ APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
 
 > 为什么要这个：真实踩过一次——用户反复构建**旧代码**，而镜像本身看不出新旧，
 > 只能靠猜；应用自报的 `/api/health` 也因此从硬编码 1.0.0 改成了读 package.json。
+
+### 构建镜像与离线分发
+
+镜像名固定为 **`docker-magnet-search`**，可以打包成一个文件带走（服务器不联网、或不想在上面构建时用）：
+
+```bash
+# ① 构建并打标签（compose 里已经声明了 image 名，直接 build 也会得到同名镜像）
+docker build -t docker-magnet-search .
+# 或
+docker compose build
+
+# ② 导出成一个文件（gzip 后通常几十 MB）
+docker save docker-magnet-search | gzip > docker-magnet-search.tar.gz
+
+# ③ 拷到服务器后导入（不需要重新构建、也不需要联网）
+docker load -i docker-magnet-search.tar.gz
+docker images docker-magnet-search          # 确认导入成功
+```
+
+用导入的镜像起服务（不重新构建）：
+
+```bash
+docker compose up -d --no-build
+```
+
+> `docker save` 存的是镜像（含所有层），`docker load` 直接还原；不需要 registry，也不需要联网。
+
+### 向外暴露端口（挑一个空闲端口）
+
+默认只绑 `127.0.0.1`（本服务**没有鉴权**，能访问到的人都能创建下载任务）。要对外提供访问，
+三步走——**先确认端口没被占用**：
+
+```bash
+# 看某个端口是否已被监听（有输出就是被占了，换一个）
+ss -lntp | grep -w 8787
+
+# 不想手动挑，就让内核给一个空闲端口看看：
+python3 -c 'import socket;s=socket.socket();s.bind(("",0));print(s.getsockname()[1]);s.close()'
+```
+
+选定端口后写进 `.env`（**同时**改成对外绑定）：
+
+```ini
+TORRENT_SEARCH_BIND=0.0.0.0
+TORRENT_SEARCH_PORT=18787
+```
+
+```bash
+docker compose up -d --force-recreate
+ss -lntp | grep -w 18787      # 应显示 0.0.0.0:18787 或 *:18787
+```
+
+**然后两道门都要放行**（缺一不可）：
+
+```bash
+# 门一：服务器防火墙
+ufw allow 18787/tcp                                  # Debian/Ubuntu
+firewall-cmd --add-port=18787/tcp --permanent && firewall-cmd --reload   # RHEL/CentOS
+# 门二：云厂商控制台的「安全组 / 防火墙规则」里放行 TCP 18787
+```
+
+最后从另一台机器验证：
+
+```bash
+curl -s http://<服务器IP>:18787/api/health      # 应返回 {"ok":true,"version":"1.3.2",...}
+```
+
+> ⚠️ 对外暴露等于把"创建下载任务、往下载目录写文件"的能力交给任何能访问到它的人。
+> 放行前想清楚；建议至少加一层带认证的反向代理（Nginx/Caddy + basic auth），或只用 SSH 隧道：
+> `ssh -N -L 18787:127.0.0.1:18787 user@服务器`。

@@ -4,18 +4,132 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="description" content="本地磁力 / BT 聚合搜索界面，聚合多个公开数据源。">
+<meta name="description" content="本地磁力 / BT 聚合搜索门户：一个搜索框聚合多个公开数据源，挑中结果即可创建下载任务。">
 <title>种子搜索 · 磁力 / BT 聚合搜索</title>
 <link rel="stylesheet" href="/style.css">
+<style>
+/* ------------------------------------------------------------------
+   门户结构补充（由 portal 角色维护）
+
+   hero 的视觉全在 style.css 的 .portal-hero / .hero-* 里，这里只补主题
+   没覆盖到的类名（步骤条、下载引导条内部布局、高级选项折叠行）以及
+   「出结果后收紧 hero」这一条门户行为。放在 <link> 之后，同权重规则以
+   本块为准；配色一律走 var(--x, 回退值)，主题换色时自动跟随。
+------------------------------------------------------------------ */
+
+/* [hidden] 兜底：style.css 里 .pagination{display:flex} 之类的 display 规则会盖掉
+   hidden 属性（UA 的 display:none 权重更低），导致落地页在没有结果时也露出
+   「第 1 / 1 页」分页条。这条只让 hidden 重新生效，不改任何可见样式。 */
+[hidden] { display: none !important; }
+
+/* hero 里的示例词：和「试试」标签同行、居中 */
+.hero-try {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.hero-try .hero-hint { margin: 0; }
+.hero-try .examples { margin-top: 0; }
+
+/* 落地页的示例词只留 hero 里那一份：空状态里的 #examples 在同一屏重复同一个 CTA，
+   读屏用户会把同样的「搜索示例关键词 …」听两遍，也白付一次布局。
+   空状态只在落地页可见（出结果后 #empty-state 本身就被隐藏），所以这条只作用于落地页。 */
+body[data-view="landing"] #examples-label,
+body[data-view="landing"] #empty-state .examples { display: none; }
+
+/* hero 大搜索框：输入框 + 按钮一行，提示行另起一行（必须允许换行，
+   否则 flex:1 1 100% 的提示行会把输入框挤成一条缝） */
+.hero-search { flex-wrap: wrap; }
+.hero-search .hero-hint { flex: 1 1 100%; margin: 0; }
+
+/* 下载引导条（.hero-download 是 style.css 提供的品红引导条）里的三步说明 */
+.portal-steps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.portal-steps li { display: inline-flex; align-items: center; gap: 6px; }
+.portal-steps strong { font-weight: 700; }
+
+.portal-actions { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* 「打开下载任务」：与品红引导条同色的次级按钮，不与主搜索按钮抢焦点 */
+.portal-actions .portal-cta {
+  border-color: rgba(255, 79, 216, 0.55);
+  color: var(--magenta, #ff4fd8);
+}
+.portal-actions .portal-cta:hover:not(:disabled) {
+  border-color: var(--magenta, #ff4fd8);
+  color: var(--magenta, #ff4fd8);
+  box-shadow: 0 0 0 1px rgba(255, 79, 216, 0.3), 0 0 18px -6px rgba(255, 79, 216, 0.9);
+}
+
+/* hero 里的保存目录：长了就省略，不撑破引导条 */
+.hero-dir {
+  max-width: 48ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 高级选项：落地页默认折叠，保持门户清爽；<details> 原生支持键盘 */
+.portal-advanced { margin: 16px 0 0; }
+.portal-advanced-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 13px;
+  border: 1px solid var(--border, #22354f);
+  border-radius: var(--radius, 10px);
+  background-color: var(--panel, #0b1220);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.portal-advanced-summary:hover {
+  background-color: var(--panel-2, #101a2b);
+  border-color: rgba(34, 211, 238, 0.45);
+}
+.portal-advanced-title { font-weight: 600; }
+.portal-advanced > .panel { margin-top: 10px; }
+.portal-advanced[open] .portal-advanced-summary { border-radius: var(--radius, 10px) var(--radius, 10px) 0 0; }
+
+/* 出结果后收紧 hero：门户入口 → 结果页，让结果区尽量靠上 */
+body[data-view="results"] .portal-hero { margin: 12px 0 14px; padding: 16px 22px 14px; }
+body[data-view="results"] .hero-inner { max-width: none; }
+body[data-view="results"] .hero-kicker,
+body[data-view="results"] .hero-sub,
+body[data-view="results"] .hero-try,
+body[data-view="results"] .portal-steps { display: none; }
+body[data-view="results"] .hero-title { font-size: 20px; letter-spacing: 1px; margin: 0 0 12px; }
+body[data-view="results"] .hero-search { max-width: none; margin: 0; }
+body[data-view="results"] .hero-download { margin-top: 12px; }
+
+@media (max-width: 760px) {
+  .hero-dir { max-width: 100%; white-space: normal; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-advanced-summary { transition: none; }
+}
+</style>
 </head>
-<body>
+<body data-view="landing">
 <a class="skip-link" href="#results">跳到搜索结果</a>
 
 <header class="site-header">
   <div class="wrap header-inner">
     <div class="brand">
       <h1>种子搜索</h1>
-      <p class="subtitle">聚合多个公开磁力 / BT 源，一次搜索拿到更全的结果</p>
+      <p class="subtitle">本地磁力 / BT 聚合搜索</p>
     </div>
     <div class="service-status" id="service-status" title="后端服务状态">
       <span class="dot" id="service-dot" data-state="unknown" aria-hidden="true"></span>
@@ -25,89 +139,123 @@
 </header>
 
 <main class="wrap">
-  <form class="search-bar" id="search-form" role="search" novalidate>
-    <label class="sr-only" for="q">搜索关键词</label>
-    <input id="q" name="q" type="search" class="search-input"
-           placeholder="输入关键词，例如 ubuntu、进击的巨人、Blender"
-           autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
-    <button type="submit" id="search-btn" class="btn primary" title="搜索（回车亦可）">搜索</button>
-  </form>
+  <section class="portal-hero" aria-label="搜索入口">
+    <div class="hero-inner">
+      <p class="hero-kicker">Search · Download · Done</p>
+      <h2 class="hero-title">输入片名，直接找种</h2>
+      <p class="hero-sub">聚合多个公开磁力 / BT 源，一次搜索拿到更全的结果；挑中之后点「下载」，交给内置下载引擎或本机 qBittorrent。</p>
 
-  <section class="panel controls" aria-label="搜索选项">
-    <div class="field">
-      <label for="sort">排序</label>
-      <select id="sort">
-        <option value="relevance">相关度</option>
-        <option value="seeders">做种数</option>
-        <option value="leechers">下载数</option>
-        <option value="size">大小</option>
-        <option value="date">时间</option>
-      </select>
-    </div>
+      <form class="search-bar hero-search" id="search-form" role="search" novalidate>
+        <label class="sr-only" for="q">搜索关键词</label>
+        <input id="q" name="q" type="search" class="search-input"
+               placeholder="搜索片名 / 软件 / 关键词，例如 ubuntu、进击的巨人"
+               autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+        <button type="submit" id="search-btn" class="btn primary" title="搜索（回车亦可）">搜索</button>
+        <p class="hero-hint">回车即可搜索 · 支持中英文关键词 · 结果可按做种数 / 大小 / 时间排序</p>
+      </form>
 
-    <div class="field">
-      <label for="page-size">每页条数</label>
-      <select id="page-size">
-        <option value="20">20</option>
-        <option value="50">50</option>
-        <option value="100">100</option>
-      </select>
-    </div>
-
-    <div class="field field-grow">
-      <div class="field-head">
-        <span id="sources-label" class="field-title">数据源</span>
-        <span id="source-count" class="muted small" aria-live="polite"></span>
-        <span class="spacer"></span>
-        <button type="button" id="select-all" class="btn tiny" title="勾选全部数据源">全选</button>
-        <button type="button" id="select-none" class="btn tiny" title="取消勾选全部数据源">全不选</button>
+      <div class="hero-try">
+        <span class="hero-hint" id="hero-try-label">试试</span>
+        <div id="hero-examples" class="examples" role="group" aria-labelledby="hero-try-label"></div>
       </div>
-      <div id="source-list" class="source-list" role="group" aria-labelledby="sources-label">
-        <p class="muted small">正在加载数据源…</p>
+
+      <div class="hero-download">
+        <ol class="portal-steps">
+          <li><strong>1</strong> 输入关键词搜索</li>
+          <li><strong>2</strong> 在结果里挑做种多的</li>
+          <li><strong>3</strong> 点「下载」加入下载任务</li>
+        </ol>
+        <div class="portal-actions">
+          <button type="button" id="hero-downloads" class="btn portal-cta"
+                  title="展开下载任务面板：查看进度、保存位置与已完成的文件">打开下载任务</button>
+          <span id="hero-download-dir" class="muted small hero-dir"></span>
+        </div>
       </div>
+
+      <div id="alert-slot" class="alert-slot" role="status" aria-live="polite"></div>
     </div>
   </section>
 
-  <section class="panel filters" aria-label="过滤条件">
-    <div class="field">
-      <label for="min-seeders">最少做种数</label>
-      <input id="min-seeders" class="text-input num-input" type="number" min="0" step="1" inputmode="numeric"
-             placeholder="0" value="0" title="只保留做种数不低于该值的结果；留空视为 0">
-    </div>
+  <details class="portal-advanced" id="portal-advanced">
+    <summary class="portal-advanced-summary">
+      <span class="portal-advanced-title">高级选项</span>
+      <span class="muted small">排序 · 数据源 · 过滤 · 封面</span>
+    </summary>
 
-    <div class="field field-grow">
-      <label for="exclude">排除关键词</label>
-      <input id="exclude" class="text-input" type="text" placeholder="cam,枪版,TS"
-             autocomplete="off" spellcheck="false" title="标题中包含任一关键词的结果会被排除，多个关键词用逗号分隔">
-    </div>
-
-    <div class="field">
-      <span class="field-title" id="safe-label">安全过滤</span>
-      <label class="check-line" for="safe">
-        <input id="safe" type="checkbox" aria-describedby="safe-hint">
-        <span id="safe-hint">排除成人分类</span>
-      </label>
-    </div>
-
-    <div class="field">
-      <span class="field-title" id="covers-label">封面</span>
-      <label class="check-line" for="covers">
-        <input id="covers" type="checkbox" aria-describedby="covers-hint">
-        <span id="covers-hint">显示封面图</span>
-      </label>
-      <p class="field-hint" id="covers-note">封面来自 Jikan / iTunes：只发送清洗后的片名，可随时关掉</p>
-    </div>
-
-    <div class="field filter-actions">
-      <span class="field-title">&nbsp;</span>
-      <div class="btn-row">
-        <button type="button" id="apply-filters" class="btn" title="应用过滤条件并重新搜索">应用过滤</button>
-        <button type="button" id="reset-filters" class="btn" title="恢复默认过滤条件">重置</button>
+    <section class="panel controls" aria-label="搜索选项">
+      <div class="field">
+        <label for="sort">排序</label>
+        <select id="sort">
+          <option value="relevance">相关度</option>
+          <option value="seeders">做种数</option>
+          <option value="leechers">下载数</option>
+          <option value="size">大小</option>
+          <option value="date">时间</option>
+        </select>
       </div>
-    </div>
-  </section>
 
-  <div id="alert-slot" class="alert-slot" role="status" aria-live="polite"></div>
+      <div class="field">
+        <label for="page-size">每页条数</label>
+        <select id="page-size">
+          <option value="20">20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+
+      <div class="field field-grow">
+        <div class="field-head">
+          <span id="sources-label" class="field-title">数据源</span>
+          <span id="source-count" class="muted small" aria-live="polite"></span>
+          <span class="spacer"></span>
+          <button type="button" id="select-all" class="btn tiny" title="勾选全部数据源">全选</button>
+          <button type="button" id="select-none" class="btn tiny" title="取消勾选全部数据源">全不选</button>
+        </div>
+        <div id="source-list" class="source-list" role="group" aria-labelledby="sources-label">
+          <p class="muted small">正在加载数据源…</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel filters" aria-label="过滤条件">
+      <div class="field">
+        <label for="min-seeders">最少做种数</label>
+        <input id="min-seeders" class="text-input num-input" type="number" min="0" step="1" inputmode="numeric"
+               placeholder="0" value="0" title="只保留做种数不低于该值的结果；留空视为 0">
+      </div>
+
+      <div class="field field-grow">
+        <label for="exclude">排除关键词</label>
+        <input id="exclude" class="text-input" type="text" placeholder="cam,枪版,TS"
+               autocomplete="off" spellcheck="false" title="标题中包含任一关键词的结果会被排除，多个关键词用逗号分隔">
+      </div>
+
+      <div class="field">
+        <span class="field-title" id="safe-label">安全过滤</span>
+        <label class="check-line" for="safe">
+          <input id="safe" type="checkbox" aria-describedby="safe-hint">
+          <span id="safe-hint">排除成人分类</span>
+        </label>
+      </div>
+
+      <div class="field">
+        <span class="field-title" id="covers-label">封面</span>
+        <label class="check-line" for="covers">
+          <input id="covers" type="checkbox" aria-describedby="covers-hint">
+          <span id="covers-hint">显示封面图</span>
+        </label>
+        <p class="field-hint" id="covers-note">封面来自 Jikan / iTunes：只发送清洗后的片名，可随时关掉</p>
+      </div>
+
+      <div class="field filter-actions">
+        <span class="field-title">&nbsp;</span>
+        <div class="btn-row">
+          <button type="button" id="apply-filters" class="btn" title="应用过滤条件并重新搜索">应用过滤</button>
+          <button type="button" id="reset-filters" class="btn" title="恢复默认过滤条件">重置</button>
+        </div>
+      </div>
+    </section>
+  </details>
 
   <section class="panel downloads-panel" id="downloads-panel" aria-label="下载任务">
     <button type="button" id="downloads-toggle" class="downloads-toggle" aria-expanded="false" aria-controls="downloads-body" title="展开/收起下载任务面板">
@@ -142,9 +290,9 @@
   <section id="results" class="results" aria-label="搜索结果">
     <div id="empty-state" class="empty-state">
       <p class="empty-title">输入关键词开始搜索</p>
-      <p class="muted">支持中英文关键词；可勾选数据源、调整排序、设置过滤条件。</p>
-      <p class="muted small">试试这些关键词：</p>
-      <div class="examples" id="examples"></div>
+      <p class="muted">支持中英文关键词；可展开「高级选项」勾选数据源、调整排序、设置过滤条件。</p>
+      <p class="muted small" id="examples-label">试试这些关键词：</p>
+      <div class="examples" id="examples" role="group" aria-labelledby="examples-label"></div>
     </div>
 
     <div id="loading" class="loading" hidden aria-hidden="true">

@@ -512,6 +512,80 @@ curl -s http://127.0.0.1:8787/api/health     # should equal the version in packa
 
 The version in that health response is how you tell whether the update took: `1.0.0` means old code.
 
+
+### Building the image and shipping it offline
+
+The image name is fixed to **`docker-magnet-search`**, and it can be packed into a single file
+(handy when the server has no internet access, or you would rather not build there):
+
+```bash
+# 1) build and tag (compose already declares the image name, so a plain build gives the same tag)
+docker build -t docker-magnet-search .
+# or
+docker compose build
+
+# 2) export to one file (tens of MB after gzip)
+docker save docker-magnet-search | gzip > docker-magnet-search.tar.gz
+
+# 3) on the server: import it (no rebuild, no network needed)
+docker load -i docker-magnet-search.tar.gz
+docker images docker-magnet-search          # confirm it landed
+```
+
+Run the imported image without rebuilding:
+
+```bash
+docker compose up -d --no-build
+```
+
+> `docker save` writes the whole image (all layers) and `docker load` restores it — no registry,
+> no network.
+
+### Exposing a port to the network (pick a free one)
+
+By default it binds `127.0.0.1` only (the service has **no authentication** — anyone who can reach it
+can create download tasks). To serve it externally, do three things — **first check the port is free**:
+
+```bash
+# is anything already listening there? (output means taken — pick another)
+ss -lntp | grep -w 8787
+
+# or let the kernel hand you a free one:
+python3 -c 'import socket;s=socket.socket();s.bind(("",0));print(s.getsockname()[1]);s.close()'
+```
+
+Then put both settings in `.env`:
+
+```ini
+TORRENT_SEARCH_BIND=0.0.0.0
+TORRENT_SEARCH_PORT=18787
+```
+
+```bash
+docker compose up -d --force-recreate
+ss -lntp | grep -w 18787      # expect 0.0.0.0:18787 or *:18787
+```
+
+**Then open both doors** (one is not enough):
+
+```bash
+# door 1: the server firewall
+ufw allow 18787/tcp                                  # Debian/Ubuntu
+firewall-cmd --add-port=18787/tcp --permanent && firewall-cmd --reload   # RHEL/CentOS
+# door 2: your cloud provider's security group / firewall rules — allow TCP 18787
+```
+
+Verify from another machine:
+
+```bash
+curl -s http://<server-ip>:18787/api/health      # {"ok":true,"version":"1.3.2",...}
+```
+
+> ⚠️ Exposing it hands "create download tasks and write files into the download directory" to anyone
+> who can reach the port. Think before opening it; prefer at least a reverse proxy with auth
+> (Nginx/Caddy + basic auth), or just use an SSH tunnel:
+> `ssh -N -L 18787:127.0.0.1:18787 user@server`.
+
 ### Configuration
 
 > **Configuring the port** (highest priority first): the `--port 9000` flag → the

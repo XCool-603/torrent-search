@@ -110,6 +110,84 @@ jobs:
           fi
           echo "✓ APP_UID=0 已被拒绝"
 
+      # 用户要的是「打包成功一个 docker-magnet-search 文件」：镜像名固定 + 能 save 成文件再 load 回来。
+      # 本机没有 docker，这条路径只能在这里真实验证。
+      - name: 镜像名为 docker-magnet-search，且能 save / load 往返
+        run: |
+          set -eux
+          docker build --progress=plain -t docker-magnet-search .
+          docker image inspect docker-magnet-search --format '{{.RepoTags}}' | grep -q 'docker-magnet-search:latest'
+
+          docker save docker-magnet-search | gzip > /tmp/docker-magnet-search.tar.gz
+          ls -lh /tmp/docker-magnet-search.tar.gz
+
+          # 删掉本地镜像，证明"文件"本身是自足的
+          docker rmi docker-magnet-search
+          docker load -i /tmp/docker-magnet-search.tar.gz
+          docker image inspect docker-magnet-search >/dev/null
+
+          # 用导入的镜像直接起服务（不重新构建），并确认健康检查通过
+          docker run -d --name ts-loaded -p 18787:8787 docker-magnet-search
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18787/api/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18787/api/health
+          docker rm -f ts-loaded
+          echo "✓ 镜像名 docker-magnet-search，save/load 往返成功，导入后可直接起服务"
+
+      # compose 里声明的镜像名也要是这个（否则 compose build 出来的名字对不上）
+      - name: compose 声明的镜像名是 docker-magnet-search
+        run: |
+          docker compose config | grep -E '^\s+image: docker-magnet-search        run: |
+          uid=$(docker run --rm torrent-search:verify id -u)
+          echo "容器内 UID = $uid"
+          test "$uid" != "0" || { echo "不该以 root 运行"; exit 1; }
+
+      - name: 下载目录与缓存目录可写
+        run: |
+          docker run --rm torrent-search:verify sh -c 'touch /downloads/.w && rm /downloads/.w'
+          docker run --rm torrent-search:verify sh -c 'touch "$TORRENT_SEARCH_CACHE/.w" 2>/dev/null || mkdir -p "$TORRENT_SEARCH_CACHE" && touch "$TORRENT_SEARCH_CACHE/.w"'
+
+      - name: 命名卷场景下仍可写（属主随镜像对齐）
+        run: docker run --rm -v ts-verify-data:/downloads torrent-search:verify sh -c 'touch /downloads/.w && rm /downloads/.w'
+
+      - name: 启动容器并通过健康检查
+        run: |
+          docker run -d --name ts-verify -p 18787:8787 torrent-search:verify
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18787/api/health > /dev/null; then ok=1; break; fi
+            sleep 1
+          done
+          echo "--- 容器日志 ---"
+          docker logs ts-verify
+          test -n "$ok" || { echo "健康检查未通过"; exit 1; }
+          echo "--- /api/health ---"
+          curl -fsS http://127.0.0.1:18787/api/health
+          docker rm -f ts-verify
+
+      - name: 容器内诊断（doctor 在容器里应说明看不到宿主机网络）
+        run: docker run --rm torrent-search:verify node bin/magnet-search.mjs doctor || true
+
+  smoke:
+    name: 实网冒烟（非阻塞）
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 公开站点随时可能被墙/改版，这一项失败只作为提示，不阻塞合并
+      - name: 实网冒烟
+        run: node tools/smoke.mjs ubuntu
+ \
+            || { echo "compose 里的 image 不是 docker-magnet-search"; exit 1; }
+          echo "✓ compose 与 docker build 用的是同一个镜像名"
+
       - name: 容器以非 root 用户运行
         run: |
           uid=$(docker run --rm torrent-search:verify id -u)
