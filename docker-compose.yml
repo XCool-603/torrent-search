@@ -30,8 +30,8 @@ services:
         APP_VERSION: ${APP_VERSION:-unknown}
         GIT_REVISION: ${GIT_REVISION:-unknown}
     # 镜像名固定为 docker-magnet-search：构建与 docker save 都用这个名字，
-# 这样"打包出来的那个文件"和"镜像名"一一对应，不会认错版本。
-image: docker-magnet-search
+    # 这样“打包出来的那个文件”和“镜像名”一一对应，不会认错版本。
+    image: docker-magnet-search
     # 刻意**不设** container_name：固定名字会关掉 Compose 的项目名前缀，
     # 同一台机器上从两个目录部署就会撞名，而且报错里的名字可能属于别的项目。
     # 需要用容器时按**服务名**引用即可（Compose 会自己解析）：
