@@ -362,17 +362,7 @@ function friendlyError(error) {
 /* 视图切换                                                            */
 /* ------------------------------------------------------------------ */
 
-/**
- * 门户形态：落地页（landing）展开 hero，一旦开始搜索就收紧 hero（results），
- * 让结果区尽量靠上。具体样式在 index.html 的门户样式块里（body[data-view=…]）。
- */
-function syncPortalMode(view) {
-  const mode = view === 'empty' ? 'landing' : 'results';
-  if (document.body.dataset.view !== mode) document.body.dataset.view = mode;
-}
-
 function setView(view) {
-  syncPortalMode(view);
   if (dom.emptyState) dom.emptyState.hidden = view !== 'empty';
   if (dom.loading) dom.loading.hidden = view !== 'loading';
   if (dom.noResults) dom.noResults.hidden = view !== 'noresults';
@@ -1572,11 +1562,6 @@ function renderDownloadsDir() {
     dom.downloadsDir.textContent = dir ? '保存到：' + dir : '';
     dom.downloadsDir.setAttribute('title', dir ? '服务端默认下载目录：' + dir : '服务端默认下载目录');
   }
-  // 门户 hero 同步显示保存位置：点「打开下载任务」之前就知道文件会落在哪
-  if (dom.heroDownloadDir) {
-    dom.heroDownloadDir.textContent = dir ? '下载保存到 ' + dir : '';
-    dom.heroDownloadDir.setAttribute('title', dir ? '服务端默认下载目录：' + dir : '');
-  }
 }
 
 function renderDownloadsEmpty() {
@@ -1936,15 +1921,6 @@ function openDownloadsPanel() {
   }
 }
 
-/** 门户 hero 的「打开下载任务」入口：后端没开下载能力时给出明确提示。 */
-function openDownloadsFromPortal() {
-  if (state.downloads.enabled === false) {
-    showAlert('error', '后端未启用下载功能（启动 serve 时没有下载管理器），无法创建下载任务。');
-    return;
-  }
-  openDownloadsPanel();
-}
-
 function closeDownloadsPanel() {
   state.downloads.open = false;
   if (dom.downloadsBody) dom.downloadsBody.hidden = true;
@@ -2056,23 +2032,22 @@ function revealAdvancedIfFiltered() {
   if (nonDefault) dom.portalAdvanced.open = true;
 }
 
-/** 示例关键词同时填到门户 hero 和结果区空状态里（两个容器共用同一份词表）。 */
+/** 示例关键词填到结果区空状态里（#examples 是唯一容器）。 */
 function renderExamples() {
-  for (const container of [dom.heroExamples, dom.examples]) {
-    if (!container) continue;
-    clear(container);
-    for (const keyword of EXAMPLE_KEYWORDS) {
-      const btn = el('button', {
-        class: 'btn tiny',
-        text: keyword,
-        attrs: { type: 'button', title: '搜索 ' + keyword, 'aria-label': '搜索示例关键词 ' + keyword },
-      });
-      btn.addEventListener('click', () => {
-        if (dom.searchInput) dom.searchInput.value = keyword;
-        runSearch({ query: keyword, page: 1 });
-      });
-      container.appendChild(btn);
-    }
+  const container = dom.examples;
+  if (!container) return;
+  clear(container);
+  for (const keyword of EXAMPLE_KEYWORDS) {
+    const btn = el('button', {
+      class: 'btn tiny',
+      text: keyword,
+      attrs: { type: 'button', title: '搜索 ' + keyword, 'aria-label': '搜索示例关键词 ' + keyword },
+    });
+    btn.addEventListener('click', () => {
+      if (dom.searchInput) dom.searchInput.value = keyword;
+      runSearch({ query: keyword, page: 1 });
+    });
+    container.appendChild(btn);
   }
 }
 
@@ -2171,9 +2146,6 @@ function bindEvents() {
   if (dom.downloadsToggle) dom.downloadsToggle.addEventListener('click', toggleDownloadsPanel);
   if (dom.downloadsRefresh) dom.downloadsRefresh.addEventListener('click', loadDownloads);
 
-  // 门户 hero 的下载入口（落地页明确的下载引导）
-  if (dom.heroDownloads) dom.heroDownloads.addEventListener('click', openDownloadsFromPortal);
-
   if (dom.prevPage) {
     dom.prevPage.addEventListener('click', () => {
       if (state.page > 1) runSearch({ query: state.query, page: state.page - 1 });
@@ -2235,9 +2207,6 @@ function cacheDom() {
   dom.prevPage = $('prev-page');
   dom.nextPage = $('next-page');
   dom.examples = $('examples');
-  dom.heroExamples = $('hero-examples');
-  dom.heroDownloads = $('hero-downloads');
-  dom.heroDownloadDir = $('hero-download-dir');
   dom.portalAdvanced = $('portal-advanced');
   dom.toast = $('toast');
   dom.serviceDot = $('service-dot');
