@@ -369,6 +369,9 @@ function setView(view) {
   if (dom.resultsTable) dom.resultsTable.hidden = view !== 'results';
   if (view !== 'results') {
     if (dom.pagination) dom.pagination.hidden = true;
+    // 离开结果视图时清掉表格里的行：否则「先搜出结果、再搜一个零结果的词」会把上一次的
+    // 行留在 DOM 里（视觉被 hidden 挡住，但 DOM 是陈旧数据，读屏与调试都会被误导）。
+    if (dom.resultsBody) clear(dom.resultsBody);
   }
   if (dom.results) dom.results.setAttribute('aria-busy', view === 'loading' ? 'true' : 'false');
 }
