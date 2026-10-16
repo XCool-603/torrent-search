@@ -860,7 +860,9 @@ mark {
   font-family: var(--mono);
 }
 
-.dl-del { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11.5px; cursor: pointer; user-select: none; }
+.dl-del {
+  flex-shrink: 0;
+  white-space: nowrap; /* 390px 下否则被逐字换行成竖排 */ display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11.5px; cursor: pointer; user-select: none; }
 .dl-del input { accent-color: var(--accent); margin: 0; }
 
 .dl-bar {
