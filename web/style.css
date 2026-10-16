@@ -843,7 +843,7 @@ mark {
 .dl-status-metadata { background-color: var(--yellow-soft); color: var(--yellow); }
 .dl-status-queued { background-color: var(--panel-3); color: var(--text-dim); }
 .dl-status-done { background-color: var(--green-soft); color: var(--green); }
-.dl-status-failed { background-color: var(--red-soft); color: var(--red); }
+.dl-status-failed { background-color: var(--red-soft); color: #ffd9db; /* B1: 浅红文字配半透明红底，约 9.9:1；原 --red 只有 3.98:1 */ }
 .dl-status-cancelled,
 .dl-status-stopped,
 .dl-status-interrupted { background-color: var(--yellow-soft); color: var(--yellow); }
