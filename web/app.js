@@ -108,6 +108,26 @@ function $(id) {
   return document.getElementById(id);
 }
 
+/**
+ * 把地址栏里的 ?token= 抹掉。
+ *
+ * 服务端在 ?token= 校验通过时会下发 HttpOnly Cookie，之后的请求都靠 Cookie，
+ * URL 里不再需要 token。但它会留在浏览器历史、以及外链请求的 Referer 里 ——
+ * 所以校验完立刻用 replaceState 去掉，不留痕。
+ */
+function stripTokenFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('token')) return;
+    url.searchParams.delete('token');
+    window.history.replaceState(null, '', url.pathname + (url.search || '') + url.hash);
+  } catch {
+    /* 老浏览器没有 URL/history API 时静默跳过，不影响功能 */
+  }
+}
+
+stripTokenFromUrl();
+
 /** 创建元素：属性与文本都走安全 API。 */
 function el(tag, options = {}, children = []) {
   const node = document.createElement(tag);
