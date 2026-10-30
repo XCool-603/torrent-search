@@ -41,14 +41,16 @@ services:
     init: true
 
     ports:
-      # 默认只发布到宿主机回环：本服务**没有鉴权**，任何能访问到它的人都能创建下载任务
+      # 默认只发布到宿主机回环：本服务**默认没有鉴权**，任何能访问到它的人都能创建下载任务
       # （往下载目录写文件）。服务器上请用 SSH 隧道访问，或显式设 TORRENT_SEARCH_BIND=0.0.0.0
-      # 并自行加防火墙/反向代理鉴权。
+      # 并**先设置 TORRENT_SEARCH_TOKEN**（公网暴露必须设），再自行加防火墙。
       - "${TORRENT_SEARCH_BIND:-127.0.0.1}:${TORRENT_SEARCH_PORT:-8787}:8787"
 
     environment:
       TORRENT_SEARCH_HOST: 0.0.0.0
       TORRENT_SEARCH_PORT: "8787"
+      # 访问令牌：留空 = 不鉴权；公网暴露时必须设置（由 .env 透传，见 .env.example）
+      TORRENT_SEARCH_TOKEN: ${TORRENT_SEARCH_TOKEN:-}
       # 下载目录固定到挂载点，文件落到宿主机
       TORRENT_SEARCH_DOWNLOAD_DIR: /downloads
       TORRENT_SEARCH_CACHE: /home/app/.cache/torrent-search

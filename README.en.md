@@ -447,7 +447,8 @@ docker compose logs -f                             # logs
 docker compose exec torrent-search node bin/magnet-search.mjs doctor   # in-container diagnosis
 ```
 
-Open <http://127.0.0.1:8787/>. It publishes to loopback only by default (there is **no authentication**).
+Open <http://127.0.0.1:8787/>. It publishes to loopback only by default (it is **unauthenticated by
+default**; set `TORRENT_SEARCH_TOKEN` before exposing it publicly).
 
 **It also works without UID/GID** (the image default 10001), but then hand the download directory over:
 
@@ -482,17 +483,18 @@ APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
 
 ```
 
-There is **no authentication**: anyone who can reach it can create download tasks (writing files into
-the download directory). It binds to loopback by default; prefer an SSH tunnel:
+There is **no authentication by default**: anyone who can reach it can create download tasks (writing
+files into the download directory). It binds to loopback by default; prefer an SSH tunnel:
 
 ```bash
 ssh -N -L 8787:127.0.0.1:8787 user@your-server
 # then open http://127.0.0.1:8787/ locally
 ```
 
-To expose it on the LAN, set `TORRENT_SEARCH_BIND=0.0.0.0` in `.env` and open **both** doors:
+To expose it on the LAN, set `TORRENT_SEARCH_BIND=0.0.0.0` in `.env`, **set `TORRENT_SEARCH_TOKEN`**
+(required for public access — see "Exposing a port" below), and open **both** doors:
 the server firewall (`ufw allow 8787` or `firewall-cmd --add-port=8787/tcp`) **and** your cloud
-provider's security group. With no authentication, put a reverse proxy with auth in front of it.
+provider's security group.
 
 To route downloads through a VPN (P2P is often blocked on restricted networks), see the gluetun
 example in the comments at the end of `docker-compose.yml`.
@@ -543,8 +545,8 @@ docker compose up -d --no-build
 
 ### Exposing a port to the network (pick a free one)
 
-By default it binds `127.0.0.1` only (the service has **no authentication** — anyone who can reach it
-can create download tasks). To serve it externally, do three things — **first check the port is free**:
+By default it binds `127.0.0.1` only (the service is **unauthenticated by default** — anyone who can
+reach it can create download tasks). To serve it externally, do three things — **first check the port is free**:
 
 ```bash
 # is anything already listening there? (output means taken — pick another)
@@ -581,9 +583,26 @@ Verify from another machine:
 curl -s http://<server-ip>:18787/api/health      # {"ok":true,"version":"1.3.2",...}
 ```
 
-> ⚠️ Exposing it hands "create download tasks and write files into the download directory" to anyone
-> who can reach the port. Think before opening it; prefer at least a reverse proxy with auth
-> (Nginx/Caddy + basic auth), or just use an SSH tunnel:
+**A token is mandatory for public access.** The service is unauthenticated by default; if the port is
+reachable from the internet, set a long random value in `.env`:
+
+```ini
+TORRENT_SEARCH_TOKEN=replace-with-a-long-random-string
+```
+
+After a restart, every request except `/api/health` (kept open for the container health check) must
+carry the token, otherwise it gets a 401. Open the page once with the token:
+
+```text
+http://<server-ip>:18787/?token=<your-token>
+```
+
+The server sets a 30-day `HttpOnly` cookie, so later same-origin page and frontend requests carry it
+automatically — **no frontend changes needed**. Scripts can send `Authorization: Bearer <token>` instead.
+
+> ⚠️ Exposing it without a token hands "create download tasks and write files into the download
+> directory" to anyone who can reach the port. Think before opening it; even with a token, prefer at
+> least a reverse proxy with auth (Nginx/Caddy + basic auth), or just use an SSH tunnel:
 > `ssh -N -L 18787:127.0.0.1:18787 user@server`.
 
 ### Configuration
@@ -601,6 +620,7 @@ Everything tunable lives in `.env` (created from `.env.example`):
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `TORRENT_SEARCH_PORT` | `8787` | Host port |
+| `TORRENT_SEARCH_TOKEN` | empty | Access token. Empty = no auth; **required** for public exposure |
 | `TORRENT_SEARCH_DOWNLOADS` | `./downloads` | Host directory for downloads (e.g. `/volume1/downloads` on a NAS) |
 | `TORRENT_SEARCH_BACKEND` | `auto` | `auto` / `builtin` / `qbittorrent` |
 | `TORRENT_SEARCH_QBITTORRENT` | `http://host.docker.internal:8080` | qBittorrent WebUI on the host |

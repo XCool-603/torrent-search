@@ -180,8 +180,9 @@ TORRENT_SEARCH_BIND=0.0.0.0
 docker compose up -d
 ```
 
-**为什么默认是 `127.0.0.1`：本服务没有鉴权。** 任何能访问到它的人都能创建下载任务
-（也就是往你的下载目录写文件）。在服务器上，推荐保持默认 + SSH 隧道。
+**为什么默认是 `127.0.0.1`：本服务默认不鉴权。** 任何能访问到它的人都能创建下载任务
+（也就是往你的下载目录写文件）。在服务器上，推荐保持默认 + SSH 隧道；
+确需对外开放时先设 `TORRENT_SEARCH_TOKEN`（第 7 节第 3 步）。
 
 > ⚠️ `TORRENT_SEARCH_BIND` 和 `TORRENT_SEARCH_DOWNLOADS` **只被 `docker-compose.yml` 使用**，
 > 应用代码根本不读它们。所以**不走 Docker 直接跑**的时候，这两个变量写进 `.env` 是**没有效果**的，
@@ -216,7 +217,8 @@ ssh -N -L 9000:127.0.0.1:9000 user@你的服务器IP
 
 ## 7. 访问方式二：对局域网 / 公网开放（两道门都要开）
 
-**先想清楚**：本服务没有鉴权。下面这条路意味着"能连到这个端口的人就能往你服务器写文件"。
+**先想清楚**：本服务默认不鉴权。下面这条路意味着"能连到这个端口的人就能往你服务器写文件"，
+所以公网暴露前**必须**先设置访问令牌（第 3 步）。
 
 1. 服务器上改 `.env`：
 
@@ -232,7 +234,27 @@ ssh -N -L 9000:127.0.0.1:9000 user@你的服务器IP
    docker compose config | grep -A3 ports      # 期望看到 host_ip: 0.0.0.0 和 published: "8787"
    ```
 
-3. **门一：宿主防火墙**（按你系统上装的那个选一条）：
+3. **公网访问必须设 token**：在同一个 `.env` 里加一个足够长的随机串：
+
+   ```bash
+   TORRENT_SEARCH_TOKEN=换成一串足够长的随机字符
+   # 生成：node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
+   ```
+
+   设置后，**除 `/api/health` 以外的所有请求**都要带 token，否则返回 `401`。
+   `/api/health` 必须保持免鉴权：Dockerfile 的 `HEALTHCHECK` 在容器内直接 `fetch` 它，
+   被拦住容器会一直 unhealthy；而它只返回运行状态，不含任何业务数据。
+
+   浏览器只需带 token 访问一次：
+
+   ```text
+   http://服务器IP:8787/?token=你的token
+   ```
+
+   服务端会下发 30 天有效的 `HttpOnly` Cookie，之后同源请求（页面、前端 fetch、图片）
+   自动携带，**前端不用任何改动**。脚本/curl 也可以带 `Authorization: Bearer <token>`。
+
+4. **门一：宿主防火墙**（按你系统上装的那个选一条）：
 
    ```bash
    # ufw（Ubuntu / Debian 常见）
@@ -247,10 +269,10 @@ ssh -N -L 9000:127.0.0.1:9000 user@你的服务器IP
    sudo iptables -I INPUT -p tcp --dport 8787 -j ACCEPT
    ```
 
-4. **门二：云厂商安全组**（阿里云 / 腾讯云 / AWS / Oracle … 的入站规则）：
+5. **门二：云厂商安全组**（阿里云 / 腾讯云 / AWS / Oracle … 的入站规则）：
    放行 **TCP 8787**。**这一步在服务器里查不出来**，但它是"本机 curl 通、外面连不上"的头号原因。
 
-5. 从**另一台机器**验证（不是服务器自己）：
+6. 从**另一台机器**验证（不是服务器自己）：
 
    ```bash
    curl -fsS http://服务器IP:8787/api/health
@@ -264,8 +286,8 @@ ssh -N -L 9000:127.0.0.1:9000 user@你的服务器IP
   INPUT 规则**。所以"只开了 ufw 却已经暴露"是真事。**最可靠的闸门是绑定地址**（`TORRENT_SEARCH_BIND=127.0.0.1`），
   而不是防火墙规则。
 
-没有鉴权还要对外开放时，**强烈建议**只放行可信来源 IP，并在前面套一层反向代理做认证
-（Caddy / Nginx 的 basic auth 都够用）。
+不设 token 还要对外开放时，**强烈建议**只放行可信来源 IP，并在前面套一层反向代理做认证
+（Caddy / Nginx 的 basic auth 都够用）；更简单的做法就是第 7 节第 3 步：设 `TORRENT_SEARCH_TOKEN`。
 
 ---
 
@@ -406,7 +428,9 @@ node bin/magnet-search.mjs serve
   或 `node bin/magnet-search.mjs serve --host 0.0.0.0`；
 - `.env` 里的 `TORRENT_SEARCH_BIND` / `TORRENT_SEARCH_DOWNLOADS` **在这里不生效**（那是 compose 专用，
   见第 5 节），用 `TORRENT_SEARCH_HOST` / `TORRENT_SEARCH_DOWNLOAD_DIR` 代替；
-- 常用诊断：`node bin/magnet-search.mjs doctor`。
+- 常用诊断：`node bin/magnet-search.mjs doctor`；
+- **公网访问前必须设 `TORRENT_SEARCH_TOKEN`**（本地直接跑同样生效）：留空 = 不鉴权；
+  设置后除 `/api/health` 外的所有请求都要带 token（见第 7 节第 3 步）。
 
 ---
 
@@ -441,6 +465,7 @@ node bin/magnet-search.mjs serve
 | `TORRENT_SEARCH_CACHE` | 应用 | 用户缓存目录 / `/home/app/.cache/torrent-search` | 磁盘缓存 |
 | `TORRENT_SEARCH_BACKEND` | 应用 | `auto` | `auto` / `builtin` / `qbittorrent` |
 | `TORRENT_SEARCH_QBITTORRENT` | 应用 | 本机 `127.0.0.1:8080` / 容器 `host.docker.internal:8080` | qBittorrent WebUI |
+| `TORRENT_SEARCH_TOKEN` | 应用 | 空 | 访问令牌；留空 = 不鉴权，公网暴露必须设置。`/api/health` 始终免鉴权 |
 | `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` | 应用（搜索请求） | 空 | 对 BT 的 P2P 流量无效 |
 
 ---
@@ -549,7 +574,7 @@ docker compose up -d --no-build
 
 ### 向外暴露端口（挑一个空闲端口）
 
-默认只绑 `127.0.0.1`（本服务**没有鉴权**，能访问到的人都能创建下载任务）。要对外提供访问，
+默认只绑 `127.0.0.1`（本服务**默认没有鉴权**，能访问到的人都能创建下载任务）。要对外提供访问，
 三步走——**先确认端口没被占用**：
 
 ```bash
@@ -572,6 +597,10 @@ docker compose up -d --force-recreate
 ss -lntp | grep -w 18787      # 应显示 0.0.0.0:18787 或 *:18787
 ```
 
+**公网访问必须设 token**：在 `.env` 里加 `TORRENT_SEARCH_TOKEN=一串足够长的随机字符`（详见第 7 节第 3 步）。
+设置后除 `/api/health` 外的所有请求都要带 token；浏览器访问一次
+`http://<服务器IP>:18787/?token=你的token` 就会记住 30 天的 Cookie，前端不用改。
+
 **然后两道门都要放行**（缺一不可）：
 
 ```bash
@@ -587,6 +616,6 @@ firewall-cmd --add-port=18787/tcp --permanent && firewall-cmd --reload   # RHEL/
 curl -s http://<服务器IP>:18787/api/health      # 应返回 {"ok":true,"version":"1.3.2",...}
 ```
 
-> ⚠️ 对外暴露等于把"创建下载任务、往下载目录写文件"的能力交给任何能访问到它的人。
-> 放行前想清楚；建议至少加一层带认证的反向代理（Nginx/Caddy + basic auth），或只用 SSH 隧道：
+> ⚠️ 不设 token 就对外暴露，等于把"创建下载任务、往下载目录写文件"的能力交给任何能访问到它的人。
+> 放行前想清楚；即使设了 token，也建议至少加一层带认证的反向代理（Nginx/Caddy + basic auth），或只用 SSH 隧道：
 > `ssh -N -L 18787:127.0.0.1:18787 user@服务器`。

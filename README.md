@@ -456,7 +456,7 @@ docker compose logs -f                             # 日志
 docker compose exec torrent-search node bin/magnet-search.mjs doctor   # 容器内诊断
 ```
 
-访问 <http://127.0.0.1:8787/>。默认只发布到回环地址（本服务**没有鉴权**）。
+访问 <http://127.0.0.1:8787/>。默认只发布到回环地址（本服务**默认没有鉴权**，公网暴露前要设 `TORRENT_SEARCH_TOKEN`）。
 
 **不传 UID/GID 也能跑**（用镜像默认的 10001），但要把下载目录交给它：
 
@@ -490,7 +490,7 @@ APP_UID=$(id -u) APP_GID=$(id -g) docker compose up -d --build
 
 ```
 
-本服务**没有鉴权**：能访问到它的人都能创建下载任务（往下载目录写文件）。默认只绑回环，
+本服务**默认没有鉴权**：能访问到它的人都能创建下载任务（往下载目录写文件）。默认只绑回环，
 推荐用 SSH 隧道访问：
 
 ```bash
@@ -500,7 +500,8 @@ ssh -N -L 8787:127.0.0.1:8787 user@你的服务器
 
 要让局域网内其它设备直接访问，在 `.env` 里设 `TORRENT_SEARCH_BIND=0.0.0.0`，
 并**同时**放行两道门：服务器防火墙（`ufw allow 8787` 或 `firewall-cmd --add-port=8787/tcp`）
-和云厂商的安全组。没有鉴权时，建议再套一层反向代理做认证。
+和云厂商的安全组。**公网访问必须设 `TORRENT_SEARCH_TOKEN`**（见「向外暴露端口」一节）；
+即使设了 token，也建议再套一层反向代理做认证。
 
 想让下载走 VPN 出口（受限网络下 BT 常被拦），见 `docker-compose.yml` 末尾的 gluetun 示例注释。
 
@@ -548,7 +549,7 @@ docker compose up -d --no-build
 
 ### 向外暴露端口（挑一个空闲端口）
 
-默认只绑 `127.0.0.1`（本服务**没有鉴权**，能访问到的人都能创建下载任务）。要对外提供访问，
+默认只绑 `127.0.0.1`（本服务**默认没有鉴权**，能访问到的人都能创建下载任务）。要对外提供访问，
 三步走——**先确认端口没被占用**：
 
 ```bash
@@ -586,8 +587,24 @@ firewall-cmd --add-port=18787/tcp --permanent && firewall-cmd --reload   # RHEL/
 curl -s http://<服务器IP>:18787/api/health      # 应返回 {"ok":true,"version":"1.3.2",...}
 ```
 
-> ⚠️ 对外暴露等于把"创建下载任务、往下载目录写文件"的能力交给任何能访问到它的人。
-> 放行前想清楚；建议至少加一层带认证的反向代理（Nginx/Caddy + basic auth），或只用 SSH 隧道：
+**公网访问必须设 token**：本服务默认不鉴权，只要端口能被公网访问，就必须在 `.env` 里加一个足够长的随机串：
+
+```ini
+TORRENT_SEARCH_TOKEN=换成一串足够长的随机字符
+```
+
+重启后，除 `/api/health`（容器健康检查用，保持免鉴权）以外的**所有**请求都要带 token，否则返回 401。
+浏览器只需要带 token 访问一次：
+
+```text
+http://<服务器IP>:18787/?token=<你的token>
+```
+
+服务端会下发 30 天有效的 `HttpOnly` Cookie，之后同一浏览器里的页面和前端请求都会自动带上，
+**前端无需任何改动**。脚本或 curl 也可以改用 `Authorization: Bearer <token>`。
+
+> ⚠️ 不设 token 就对外暴露，等于把"创建下载任务、往下载目录写文件"的能力交给任何能访问到它的人。
+> 放行前想清楚；即使设了 token，也建议再加一层带认证的反向代理（Nginx/Caddy + basic auth），或只用 SSH 隧道：
 > `ssh -N -L 18787:127.0.0.1:18787 user@服务器`。
 
 ### 配置
@@ -603,6 +620,7 @@ curl -s http://<服务器IP>:18787/api/health      # 应返回 {"ok":true,"versi
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `TORRENT_SEARCH_PORT` | `8787` | 宿主机对外端口 |
+| `TORRENT_SEARCH_TOKEN` | 空 | 访问令牌。留空 = 不鉴权；公网暴露时**必须**设置 |
 | `TORRENT_SEARCH_DOWNLOADS` | `./downloads` | 宿主机存放下载文件的目录（NAS 上可指向 `/volume1/downloads`） |
 | `TORRENT_SEARCH_BACKEND` | `auto` | `auto` / `builtin` / `qbittorrent` |
 | `TORRENT_SEARCH_QBITTORRENT` | `http://host.docker.internal:8080` | 宿主机上的 qBittorrent WebUI |

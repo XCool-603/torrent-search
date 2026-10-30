@@ -13,6 +13,7 @@
 
 import { VERSION } from './version.mjs';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
@@ -28,6 +29,15 @@ const DEFAULT_WEB_DIR = fileURLToPath(new URL('../web/', import.meta.url));
 const DEFAULT_SEARCH_CACHE_TTL_MS = 60_000;
 const MAX_QUERY_LENGTH = 200;
 const MAX_EXCLUDE_KEYWORDS = 20;
+
+/**
+ * 鉴权 Cookie 名与有效期（30 天）。
+ *
+ * 为什么用 Cookie：浏览器访问一次 `/?token=xxx` 后，后续同源请求（页面、fetch、图片）
+ * 会自动带上它，前端一行都不用改；HttpOnly 让页面脚本读不到 token。
+ */
+const AUTH_COOKIE_NAME = 'ts_token';
+const AUTH_COOKIE_MAX_AGE_SEC = 30 * 24 * 60 * 60;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -49,6 +59,7 @@ const MIME_TYPES = {
  * @param {{
  *   http: any, cache: any, version?: string, webDir?: string,
  *   logger?: (msg: string) => void, defaultTimeoutMs?: number, maxPageSize?: number,
+ *   token?: string,           // 访问令牌；空/未设置 = 不鉴权。默认读 TORRENT_SEARCH_TOKEN
  *   downloadManager?: any,   // 提供后启用 /api/downloads* 下载接口
  * }} options
  * @returns {import('node:http').Server}
@@ -59,6 +70,8 @@ export function createApiServer(options) {
   const startedAt = Date.now();
   const defaultTimeoutMs = options.defaultTimeoutMs ?? 8_000;
   const maxPageSize = options.maxPageSize ?? 100;
+  // 空串/纯空白视为「未设置」：保持历史行为（不鉴权），也让测试能显式关掉环境变量。
+  const authToken = normalizeToken(options.token ?? process.env.TORRENT_SEARCH_TOKEN);
 const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见行分批请求）
 
   const server = http.createServer((req, res) => {
@@ -79,8 +92,23 @@ const MAX_COVER_TITLES = 24; // 一次最多查多少个标题（前端按可见
     const pathname = safeDecode(url.pathname);
 
     res.on('finish', () => {
-      logger(`${req.method} ${pathname}${url.search ? url.search : ''} → ${res.statusCode} (${Date.now() - requestStarted}ms)`);
+      // 日志里绝不能出现 token：?token= 是访问凭据，落到 stdout/容器日志里等于泄露。
+      logger(`${req.method} ${pathname}${redactedSearch(url)} → ${res.statusCode} (${Date.now() - requestStarted}ms)`);
     });
+
+    // 鉴权闸门放在所有路由之前：API、静态页面、边下边播都必须先过这一关。
+    // /api/health 例外——Dockerfile 的 HEALTHCHECK 在容器内直接 fetch 它，
+    // 若被拦住容器会一直 unhealthy，而健康检查本身不返回任何业务数据。
+    if (authToken !== null && pathname !== '/api/health') {
+      const auth = authenticate(req, url, authToken);
+      if (!auth.ok) {
+        sendJson(res, 401, { error: { code: 'unauthorized', message: '未授权：缺少或错误的访问令牌' } });
+        return;
+      }
+      // 从 ?token= 进来且校验通过时下发 Cookie，让浏览器后续同源请求自动携带。
+      // 只有 query 方式才下发：避免脚本用 Header 调一次就被塞 Cookie（不必要）。
+      if (auth.fromQuery) res.setHeader('set-cookie', authCookie(authToken));
+    }
 
     if (pathname === '/api' || pathname.startsWith('/api/')) {
       await handleApi(req, res, url, pathname);
@@ -783,6 +811,121 @@ export async function startServer(options) {
         server.closeAllConnections?.();
       }),
   };
+}
+
+/**
+ * 归一化访问令牌：未设置 / 空串 / 纯空白都表示不鉴权。
+ *
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+function normalizeToken(value) {
+  if (value === undefined || value === null) return null;
+  const token = String(value).trim();
+  return token === '' ? null : token;
+}
+
+/**
+ * 定长比较 token（防时序攻击）。
+ *
+ * `crypto.timingSafeEqual` 要求两个 Buffer 等长，所以先比长度：
+ * 长度不同直接返回 false——长度本身不是秘密，提前返回不会泄露内容。
+ *
+ * @param {string|null|undefined} actual
+ * @param {string} expected
+ * @returns {boolean}
+ */
+function tokensEqual(actual, expected) {
+  if (typeof actual !== 'string' || actual === '') return false;
+  const a = Buffer.from(actual, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * 从 `Authorization: Bearer <token>` 里取出 token（大小写不敏感）。
+ *
+ * @param {string|undefined} header
+ * @returns {string|null}
+ */
+function bearerToken(header) {
+  if (typeof header !== 'string') return null;
+  const match = header.match(/^\s*Bearer\s+(.+?)\s*$/i);
+  return match ? match[1] : null;
+}
+
+/**
+ * 从 Cookie 头里取指定名字的值。
+ *
+ * 值在下发时做过 encodeURIComponent，这里对应解码；坏编码按原样返回，
+ * 交给后面的定长比较去判定失败，不抛异常。
+ *
+ * @param {string|undefined} header
+ * @param {string} name
+ * @returns {string|null}
+ */
+function cookieValue(header, name) {
+  if (typeof header !== 'string') return null;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() !== name) continue;
+    const raw = part.slice(eq + 1).trim();
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+  return null;
+}
+
+/**
+ * 三种携带方式任一匹配即通过：`?token=` / `Authorization: Bearer` / Cookie。
+ *
+ * 返回 `fromQuery` 让调用方知道是否该下发 Cookie（只有从 URL 进来的才下发）。
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @param {URL} url
+ * @param {string} expected
+ * @returns {{ok: boolean, fromQuery: boolean}}
+ */
+function authenticate(req, url, expected) {
+  const queryToken = url.searchParams.get('token');
+  if (tokensEqual(queryToken, expected)) return { ok: true, fromQuery: true };
+
+  if (tokensEqual(bearerToken(req.headers.authorization), expected)) return { ok: true, fromQuery: false };
+  if (tokensEqual(cookieValue(req.headers.cookie, AUTH_COOKIE_NAME), expected)) return { ok: true, fromQuery: false };
+
+  return { ok: false, fromQuery: false };
+}
+
+/**
+ * 构造鉴权 Cookie。
+ *
+ * HttpOnly：页面脚本读不到；SameSite=Lax：跨站请求不带，降低 CSRF 面；
+ * Path=/：全站生效。有效期 30 天，省得用户频繁重新带 token。
+ *
+ * @param {string} token
+ * @returns {string}
+ */
+function authCookie(token) {
+  return `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${AUTH_COOKIE_MAX_AGE_SEC}`;
+}
+
+/**
+ * 日志用的 query 串：把 token 的值替换成 `***`，其余参数保持原样。
+ *
+ * @param {URL} url
+ * @returns {string}
+ */
+function redactedSearch(url) {
+  if (!url.search) return '';
+  if (!url.searchParams.has('token')) return url.search;
+  const params = new URLSearchParams(url.search);
+  params.set('token', '***');
+  return `?${params.toString()}`;
 }
 
 function sendJson(res, status, payload) {
