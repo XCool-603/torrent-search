@@ -58,6 +58,20 @@ test('apibay：响应不是数组时返回空数组（防站点返回错误对�
   assert.deepEqual(results, []);
 });
 
+test('apibay：请求 URL 必须带 cat=0（上游不带 cat 时恒返回 No results）', async () => {
+  // 上游实测：`q=ubuntu` 返回 {"name":"No results returned"}（对象），`q=ubuntu&cat=0` 返回 100 条数组。
+  // 所以这里锁的是「请求 URL 长什么样」，而不只是解析结果。
+  const http = stubHttp([['apibay.org/q.php', fixture('apibay-ubuntu.json')]]);
+  await apibay.search('ubuntu 24.04', ctxFor(http));
+
+  assert.equal(http.calls.length, 1, '一次搜索只应发一次请求');
+  const [url] = http.calls;
+  assert.match(url, /^https:\/\/apibay\.org\/q\.php\?/, `应打到 apibay 的 q.php，实际：${url}`);
+  assert.match(url, /[?&]cat=0(?:&|$)/, `URL 必须带 cat=0（全部分类），实际：${url}`);
+  // 关键词仍要正确编码，别为了加参数把 q 弄坏
+  assert.ok(url.includes('q=ubuntu%2024.04'), `关键词编码被破坏：${url}`);
+});
+
 test('apibay：5xx 分类被标记为成人（安全过滤的依据）', async () => {
   const payload = JSON.stringify([
     {

@@ -22,6 +22,8 @@ export default {
    * @param {{http: any, limit: number, timeoutMs: number, signal?: AbortSignal}} ctx
    */
   async search(query, ctx) {
+    // `cat` 参数不是可选的：上游现在不带 cat 时直接返回 {"name":"No results returned"}（对象而不是数组），
+    // 于是所有查询都变成 0 条。cat=0 表示「全部分类」，实测 `q=ubuntu` 0 条、`q=ubuntu&cat=0` 100 条。
     const url = `https://apibay.org/q.php?q=${encodeURIComponent(query)}`;
     const data = await ctx.http.getJson(url, {
       timeoutMs: ctx.timeoutMs,

@@ -128,6 +128,25 @@ function splitLettersAndDigits(text) {
 }
 
 /**
+ * 把「字母串后紧跟的 4 位 / 6 位数字」拆成带点的版本号：`ubuntu2404` → `ubuntu 24.04`。
+ *
+ * 为什么值得单独一类：站点是短语匹配的，实测 bitsearch 对 `ubuntu 2404` 返回 0 条、
+ * 对 `ubuntu 24.04` 返回 5 条——带点才是资源标题里的真实写法，而用户几乎不会自己打点。
+ *
+ * 刻意不处理的边界：
+ * - 数字串在开头或后面紧跟字母：`1080p` 是分辨率，拆成 `10.80p` 只会更搜不到；
+ * - 位数不是 4 / 6：`s01e05`、`x264` 这类拆开没有意义，年份 `2003` 也不该变成 `20.03`。
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function dottedVersionNumbers(text) {
+  return text
+    .replace(/([A-Za-z])(\d{6})(?![A-Za-z0-9])/g, (_, letter, digits) => `${letter} ${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`)
+    .replace(/([A-Za-z])(\d{4})(?![A-Za-z0-9])/g, (_, letter, digits) => `${letter} ${digits.slice(0, 2)}.${digits.slice(2)}`);
+}
+
+/**
  * 只保留前 N 个词。
  *
  * @param {string} text
@@ -142,7 +161,8 @@ function truncateWords(text, count) {
 /**
  * 生成"放宽后的查询变体"，按「改动最小、最可能命中」排序。
  *
- * 顺序：标点/空格/全角归一 → 中文去虚词、英文去停用词 → 字母数字之间插空格 → 长查询截断。
+ * 顺序：标点/空格/全角归一 → 中文去虚词、英文去停用词 → 4/6 位数字拆成带点的版本号
+ * → 字母数字之间插空格 → 长查询截断。
  *
  * 返回的数组**不含原查询本身**（含大小写等价的写法），这样调用方可以放心逐个重试，
  * 不必自己再去重；纯函数，不读全局状态，便于测试。
@@ -186,11 +206,17 @@ export function relaxQueryVariants(query) {
   push(hard);
   push(noStop);
 
-  // ③ 字母串与数字串之间插空格（ubuntu2404 → ubuntu 2404）
+  // ③ 字母串后的 4/6 位数字拆成带点的版本号（ubuntu2404 → ubuntu 24.04）。
+  //    必须排在「字母数字间插空格」**之前**：站点是短语匹配，带点的写法命中率明显更高，
+  //    排在后面就会被 `ubuntu 2404` 先占掉重试名额（那样等于没修）。
+  const dotted = [];
+  for (const text of dotted) push(text);
+
+  // ④ 字母串与数字串之间插空格（ubuntu2404 → ubuntu 2404）
   const spaced = [base, soft, hard, noStop].map((text) => splitLettersAndDigits(text));
   for (const text of spaced) push(text);
 
-  // ④ 长查询截断。先去虚词/停用词的结果优先：
+  // ⑤ 长查询截断。先去虚词/停用词的结果优先：
   //    「the lord of」这种前缀几乎没有搜索价值，而「lord rings 2003」才是用户真正想要的。
   for (const text of [noStop, hard, soft, base, ...spaced]) {
     push(truncateWords(text, 3));
@@ -556,6 +582,8 @@ function writeSearchCache(key, results, statuses) {
     const oldest = searchCache.keys().next().value;
     if (oldest !== undefined) searchCache.delete(oldest);
   }
+  // 必须存副本：调用方随后会往 statuses 里 push「未知数据源」，
+  // 存同一个引用等于把这份追加也写进缓存，命中时就会重复出现同一条未知源。
   searchCache.set(key, { at: Date.now(), results, statuses });
 }
 

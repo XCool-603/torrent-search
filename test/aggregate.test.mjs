@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { searchAll, searchOne, mergeResults, sortResults, scoreResult, describeError, selectSources } from '../src/aggregate.mjs';
+import { searchAll, searchOne, mergeResults, sortResults, scoreResult, describeError, selectSources, clearSearchCache } from '../src/aggregate.mjs';
 import { fakeResult, fakeSource, memoryCache } from './helpers.mjs';
 
 const HASH_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -271,6 +271,26 @@ test('searchAll：未知数据源被标记为失败而不是被忽略', async ()
   assert.equal(result.sources.length, 1);
   assert.equal(result.sources[0].ok, false);
   assert.equal(result.sources[0].error, '未知数据源');
+});
+
+test('searchAll：缓存命中时不会重复追加「未知数据源」（写缓存存的是副本）', async () => {
+  // 复现既有 bug：writeSearchCache 存的是 statuses 的同一个数组引用，
+  // searchAll 随后往它里面 push「未知数据源」，于是缓存里也多了这条，
+  // 命中时再 push 一次 → 同一个未知源出现两遍。
+  clearSearchCache();
+
+  const first = await searchAll({ query: 'zz', sources: 'nope', cacheTtlMs: 60_000, ...ctx() });
+  assert.equal(first.sources.filter((status) => status.id === 'nope').length, 1);
+
+  const second = await searchAll({ query: 'zz', sources: 'nope', cacheTtlMs: 60_000, ...ctx() });
+  assert.equal(second.cached, true, '第二次应命中缓存');
+  assert.equal(
+    second.sources.filter((status) => status.id === 'nope').length,
+    1,
+    `未知源只能出现一次，实际：${JSON.stringify(second.sources)}`,
+  );
+
+  clearSearchCache();
 });
 
 test('searchAll：分页正确（含最后一页）', async () => {
