@@ -1,0 +1,9 @@
+种子搜索服务已启动
+  Web UI   http://127.0.0.1:8899/
+  监听 0.0.0.0 —— 容器/局域网可通过宿主机 IP 访问（本机仍可用 127.0.0.1）
+  JSON API http://127.0.0.1:8899/api/search?q=ubuntu
+  下载目录 C:\Users\23504\Downloads\torrent-search
+  下载后端 自动（有 qBittorrent 就用它）
+  已恢复   8 个历史任务
+  代理     直连
+按 Ctrl+C 退出

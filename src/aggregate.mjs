@@ -209,7 +209,7 @@ export function relaxQueryVariants(query) {
   // ③ 字母串后的 4/6 位数字拆成带点的版本号（ubuntu2404 → ubuntu 24.04）。
   //    必须排在「字母数字间插空格」**之前**：站点是短语匹配，带点的写法命中率明显更高，
   //    排在后面就会被 `ubuntu 2404` 先占掉重试名额（那样等于没修）。
-  const dotted = [];
+  const dotted = [base, soft, hard, noStop].map((text) => dottedVersionNumbers(text));
   for (const text of dotted) push(text);
 
   // ④ 字母串与数字串之间插空格（ubuntu2404 → ubuntu 2404）
@@ -584,7 +584,11 @@ function writeSearchCache(key, results, statuses) {
   }
   // 必须存副本：调用方随后会往 statuses 里 push「未知数据源」，
   // 存同一个引用等于把这份追加也写进缓存，命中时就会重复出现同一条未知源。
-  searchCache.set(key, { at: Date.now(), results, statuses });
+  searchCache.set(key, {
+    at: Date.now(),
+    results: [...results],
+    statuses: statuses.map((status) => ({ ...status })),
+  });
 }
 
 /**
