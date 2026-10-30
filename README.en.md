@@ -146,6 +146,29 @@ node bin/magnet-search.mjs ubuntu --safe --sort leechers --order asc
 
 **Exit codes**: `0` success (including "no results"), `1` runtime error or **all** sources failed, `2` bad arguments.
 
+### Automatic query relaxation when a search comes up short
+
+Upstream sites require **separated** keywords and are spelling-sensitive: `ubuntu2404` (no separator)
+really returns 0 results, while `ubuntu 24.04` returns dozens. So when the filtered result count is
+below 5, the tool retries a few other spellings, **at most 3 extra rounds**, and stops as soon as it
+has 5:
+
+```bash
+node bin/magnet-search.mjs ubuntu2404
+# it actually tries: ubuntu2404 → ubuntu 2404 (a space is inserted between letters and digits)
+```
+
+Variants are ordered by "smallest change, most likely to hit":
+
+1. full-width → half-width, lowercase English, punctuation and redundant spaces normalised;
+2. Chinese function words dropped (`的 了 之 版 篇 集 季 第 全`), English stop words dropped
+   (`the a an of on in for and with`);
+3. a space inserted between a letter run and a digit run (`ubuntu2404` → `ubuntu 2404`);
+4. long queries truncated to the first 2–3 words.
+
+Whenever it really relaxes, it says so (a CLI line, the web UI result summary, and `relaxedFrom` /
+`relaxedTo` in the JSON); when results are already plentiful it does **not** send a single extra request.
+
 ### Downloading
 
 A **zero-dependency minimal BitTorrent engine** is built in (HTTP/UDP trackers, peer protocol,
@@ -276,6 +299,8 @@ that enter the viewport**, applied progressively in small batches.
 ```jsonc
 {
   "query": "ubuntu",
+  "relaxedFrom": null,      // the original query when auto-relaxation kicked in; null otherwise
+  "relaxedTo": null,        // the relaxed query actually used (e.g. "ubuntu 2404"); null otherwise
   "sort": "relevance",
   "order": "desc",
   "tookMs": 1234,
@@ -312,6 +337,9 @@ that enter the viewport**, applied progressively in small batches.
 
 > Fields a site does not provide are always `null` (e.g. dmhy has no size or seeder count) — never faked as `0`.
 > `adult` relies solely on the site's own category tags, not on guessing from titles.
+> `relaxedFrom` / `relaxedTo` are only set when auto-relaxation happened **and** actually found more
+> results; `query` still echoes the user's original words, while the results come from `relaxedTo` —
+> the frontend uses that to say "auto-relaxed to …" instead of guessing.
 
 ### Other endpoints
 

@@ -162,6 +162,27 @@ node bin/magnet-search.mjs ubuntu --safe --sort leechers --order asc
 
 **退出码**：`0` 成功（包括「没有结果」）、`1` 运行出错或**全部**数据源失败、`2` 参数错误。
 
+### 查不到时会自动放宽关键词
+
+上游站点要求关键词之间**有分隔**，而且对拼写敏感：`ubuntu2404` 连写实测直接 0 条，
+`ubuntu 24.04` 有几十条。所以过滤后结果少于 5 条时，工具会自动换几个写法再试，
+**最多重试 3 次**，凑够 5 条就停：
+
+```bash
+node bin/magnet-search.mjs ubuntu2404
+# 实际依次尝试：ubuntu2404 → ubuntu 2404（在字母串与数字串之间补空格）
+```
+
+放宽顺序按「改动最小、最可能命中」排：
+
+1. 全角→半角、英文小写、标点与多余空格归一；
+2. 中文去虚词（`的 了 之 版 篇 集 季 第 全`）、英文去停用词（`the a an of on in for and with`）；
+3. 字母串与数字串之间插空格（`ubuntu2404` → `ubuntu 2404`）；
+4. 长查询只保留前 2–3 个词。
+
+只要真的放宽了就会明确告知（CLI 一行提示、Web UI 结果摘要、JSON 里的 `relaxedFrom` / `relaxedTo`）；
+结果本来就够时**一个多余的请求都不会发**。
+
 ### 下载
 
 内置了一个**零依赖的最小 BT 引擎**（Tracker HTTP/UDP、Peer 协议、BEP 9 元数据交换、
@@ -285,6 +306,8 @@ npm run perf -- --url "http://127.0.0.1:8787/?q=ubuntu" --page-size 100
 ```jsonc
 {
   "query": "ubuntu",
+  "relaxedFrom": null,      // 自动放宽前的原查询；没放宽时为 null
+  "relaxedTo": null,        // 实际生效的放宽查询（如 "ubuntu 2404"）；没放宽时为 null
   "sort": "relevance",
   "order": "desc",
   "tookMs": 1234,
@@ -321,6 +344,8 @@ npm run perf -- --url "http://127.0.0.1:8787/?q=ubuntu" --page-size 100
 
 > 站点不提供的字段一律为 `null`（例如 dmhy 没有体积与做种数），**不会**用 `0` 冒充。
 > `adult` 只依据站点自己的分类标注（apibay 5xx、BitSearch 10），不猜标题关键词。
+> `relaxedFrom` / `relaxedTo` 只在自动放宽**且确实搜到了更多结果**时才有值，此时 `query` 仍是用户原话，
+> 结果却是按 `relaxedTo` 搜出来的——前端据此提示「已自动放宽为「…」」，不必自己猜。
 
 ### 其它接口
 

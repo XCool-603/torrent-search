@@ -235,6 +235,12 @@ async function runSearch(query, options, color) {
   if (filterSummary) {
     process.stdout.write(`${color(COLORS.gray)('过滤条件：')}${filterSummary}\n`);
   }
+  // 放宽过就必须说：否则用户会以为「ubuntu2404」真的能搜到这些结果
+  if (result.relaxedTo) {
+    process.stdout.write(
+      `${color(COLORS.gray)('已自动放宽查询：')}${color(COLORS.cyan)(`「${query}」→「${result.relaxedTo}」`)}\n`,
+    );
+  }
   process.stdout.write('\n');
 
   if (result.results.length === 0) {

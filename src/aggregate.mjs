@@ -7,6 +7,9 @@
  * - 去重优先用 info hash：同一个种子在 TPB 和 BitSearch 上标题可能不同，但 hash 相同。
  * - 排序默认用相关度（标题命中 + 做种数 + 新鲜度），而不是单纯做种数，
  *   否则搜"进击的巨人"会被高做种数的无关资源挤掉。
+ * - 上游站点要求关键词之间有分隔且拼写敏感（`ubuntu2404` 连写直接 0 条），
+ *   所以结果太少时会自动放宽查询再试（见 relaxQueryVariants），
+ *   并在响应里用 relaxedFrom / relaxedTo 如实说明"这次不是按你原话搜的"。
  */
 
 import { dedupeKey, normalizeTitle, tokenize } from './models.mjs';
@@ -16,6 +19,186 @@ export const SORT_MODES = ['relevance', 'seeders', 'leechers', 'size', 'date'];
 
 /** 排序方向 */
 export const SORT_ORDERS = ['desc', 'asc'];
+
+/**
+ * 自动放宽的触发阈值：过滤后条数低于它，才值得再花几次请求去试别的写法。
+ *
+ * 为什么不设成 0：搜索 0 条固然要放宽，但"只有 2 条"往往同样是关键词没被站点接受，
+ * 而不是这个资源真的只有 2 个；反过来阈值也不能太高，否则常见关键词会白白多打请求。
+ */
+export const RELAX_THRESHOLD = 5;
+
+/** 放宽最多重试几次：每次重试都要把所有源再扇出一次，必须封顶。 */
+const MAX_RELAX_ATTEMPTS = 3;
+
+/** 变体总数上限（真正会试的只有前 3 个，这里留余量给调试与测试）。 */
+const MAX_RELAX_VARIANTS = 8;
+
+/**
+ * 中文虚词，按"改动从轻到重"分成两组。
+ *
+ * 先只去掉语法虚词（的/了/之），这类词几乎不承载语义，去掉最安全；
+ * 「版/篇/集/季/第/全」会改变语义（"最终季" → "最终"），只能作为更靠后的兜底。
+ */
+const CJK_PARTICLES_SOFT = ['的', '了', '之'];
+const CJK_PARTICLES_EDITION = ['版', '篇', '集', '季', '第', '全'];
+
+/** 英文停用词：站点对这类词很敏感，带着它们经常直接 0 条。 */
+const EN_STOPWORDS = new Set(['the', 'a', 'an', 'of', 'on', 'in', 'for', 'and', 'with']);
+
+/**
+ * 全角字符转半角。
+ *
+ * 为什么单独做：中文输入法下打出来的 `ｕｂｕｎｔｕ２４０４` 在上游站点里就是另一串字符，
+ * 而用户完全看不出区别——这是"明明有资源却搜不到"的典型原因之一。
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function toHalfWidth(text) {
+  let out = '';
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    if (code === 0x3000) out += ' ';
+    else if (code >= 0xff01 && code <= 0xff5e) out += String.fromCodePoint(code - 0xfee0);
+    else out += char;
+  }
+  return out;
+}
+
+/**
+ * 关键词归一化：全角→半角、英文小写、标点与空格收敛。
+ *
+ * 取舍：逗号/分号/冒号/顿号这类"真分隔符"变成空格；连字符、点号、下划线**保留**——
+ * `cache-off`、`24.04`、`s01e05` 都是有意义的整体，拆开反而会搜出更多无关结果。
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function normalizeQuery(text) {
+  let out = toHalfWidth(String(text ?? '')).toLowerCase();
+  out = out.replace(/[,;，、；：:]/g, ' ');
+  out = out.replace(/\s+/g, ' ').trim();
+  // 首尾标点：`【进击的巨人】`、`ubuntu!!!` 这类包裹/拖尾的符号对站点没有意义
+  out = out.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '');
+  // 中间连续重复的标点压成一个（`a!!!b` → `a!b`），再收一次空格
+  out = out.replace(/([^\p{L}\p{N}\s])\1+/gu, '$1');
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 去掉中文虚词。
+ *
+ * @param {string} text
+ * @param {string[]} particles
+ * @returns {string}
+ */
+function stripCjkParticles(text, particles) {
+  let out = text;
+  for (const particle of particles) out = out.split(particle).join('');
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 去掉英文停用词。
+ *
+ * 只有一个词时原样返回：`a` 去掉就什么都不剩了，那不是"放宽"而是"清空"。
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripEnglishStopwords(text) {
+  const words = text.split(' ').filter(Boolean);
+  if (words.length < 2) return text;
+  const kept = words.filter((word) => !EN_STOPWORDS.has(word));
+  return kept.length === 0 ? '' : kept.join(' ');
+}
+
+/**
+ * 在「字母串紧跟数字串」的边界插空格：`ubuntu2404` → `ubuntu 2404`。
+ *
+ * 只处理 ASCII 字母后接数字这一个方向：反方向会把 `1080p` 拆成 `1080 p`，
+ * 而 `1080p` 恰恰是站点上最常见的写法，拆了只会更搜不到。
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function splitLettersAndDigits(text) {
+  return text.replace(/([A-Za-z])(\d)/g, '$1 $2').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 只保留前 N 个词。
+ *
+ * @param {string} text
+ * @param {number} count
+ * @returns {string}
+ */
+function truncateWords(text, count) {
+  const words = text.split(' ').filter(Boolean);
+  return words.length <= count ? text : words.slice(0, count).join(' ');
+}
+
+/**
+ * 生成"放宽后的查询变体"，按「改动最小、最可能命中」排序。
+ *
+ * 顺序：标点/空格/全角归一 → 中文去虚词、英文去停用词 → 字母数字之间插空格 → 长查询截断。
+ *
+ * 返回的数组**不含原查询本身**（含大小写等价的写法），这样调用方可以放心逐个重试，
+ * 不必自己再去重；纯函数，不读全局状态，便于测试。
+ *
+ * @param {string} query 用户原始查询
+ * @returns {string[]} 去重后的放宽变体（可能为空数组 = 没有可放宽的余地）
+ */
+export function relaxQueryVariants(query) {
+  const original = String(query ?? '').trim();
+  if (original === '') return [];
+
+  const base = normalizeQuery(original);
+  if (base === '') return [];
+
+  // 大小写等价不算放宽：站点本来就不区分大小写，重试只会白打一轮请求。
+  // 但全角→半角、去包裹标点算——那些在站点眼里是不同的字符串。
+  const seen = new Set([original.toLowerCase()]);
+  const variants = [];
+
+  /**
+   * @param {string} candidate
+   */
+  const push = (candidate) => {
+    if (variants.length >= MAX_RELAX_VARIANTS) return;
+    const text = String(candidate ?? '').replace(/\s+/g, ' ').trim();
+    if (text === '') return;
+    const key = normalizeQuery(text);
+    if (key === '' || seen.has(key)) return;
+    seen.add(key);
+    variants.push(text);
+  };
+
+  // ① 标点/空格/全角归一
+  push(base);
+
+  // ② 去虚词与停用词
+  const soft = stripCjkParticles(base, CJK_PARTICLES_SOFT);
+  const hard = stripCjkParticles(base, [...CJK_PARTICLES_SOFT, ...CJK_PARTICLES_EDITION]);
+  const noStop = stripEnglishStopwords(base);
+  push(soft);
+  push(hard);
+  push(noStop);
+
+  // ③ 字母串与数字串之间插空格（ubuntu2404 → ubuntu 2404）
+  const spaced = [base, soft, hard, noStop].map((text) => splitLettersAndDigits(text));
+  for (const text of spaced) push(text);
+
+  // ④ 长查询截断。先去虚词/停用词的结果优先：
+  //    「the lord of」这种前缀几乎没有搜索价值，而「lord rings 2003」才是用户真正想要的。
+  for (const text of [noStop, hard, soft, base, ...spaced]) {
+    push(truncateWords(text, 3));
+    push(truncateWords(text, 2));
+  }
+
+  return variants;
+}
 
 /**
  * 执行聚合搜索。
@@ -39,6 +222,13 @@ export const SORT_ORDERS = ['desc', 'asc'];
  *   logger?: (msg: string) => void,
  *   signal?: AbortSignal,
  * }} options
+ * @returns {Promise<{query: string, relaxedFrom: string|null, relaxedTo: string|null, sort: string, order: string,
+ *   tookMs: number, page: number, pageSize: number, total: number, totalBeforeFilter: number, totalPages: number,
+ *   filters: any, cached: boolean, results: any[], sources: any[]}>}
+ *
+ * 返回值的两个放宽标记：
+ * - 没放宽：relaxedFrom / relaxedTo 都是 null；
+ * - 放宽了：relaxedFrom = 用户原查询，relaxedTo = 实际生效的查询（query 始终是原查询）。
  */
 export async function searchAll(options) {
   const query = String(options.query ?? '').trim();
@@ -64,76 +254,122 @@ export async function searchAll(options) {
 
   const { sources, unknown } = selectSources(options.sources ?? 'default');
   const startedAt = Date.now();
+  const sourceIds = sources.map((source) => source.id).join(',');
 
-  // 缓存键必须包含 limitPerSource 与 sort：
-  // - 翻页时每源抓取条数会变，缓存内容不能混用；
-  // - 有些站点（如 BitSearch）的排序参数会改变**返回的结果集合**而不只是顺序，
-  //   漏掉 sort 会让不同排序的请求互相复用对方那批候选。
-  const cacheKey = `${query}|${sources.map((source) => source.id).join(',')}|${limitPerSource}|${sort}`;
+  /**
+   * 用某个关键词完整跑一轮（读缓存 → 扇出 → 写缓存 → 合并 → 过滤）。
+   *
+   * 抽成函数是为了让"放宽重试"走完全相同的路径：缓存键由**实际使用的关键词**拼出来，
+   * 所以放宽查询的结果只会落在放宽后的键上，绝不会被当成原查询的缓存。
+   *
+   * @param {string} keyword 这一轮真正发给各数据源的关键词
+   * @returns {Promise<{keyword: string, statuses: any[], fromCache: boolean, filtered: any[], total: number, totalBeforeFilter: number}>}
+   */
+  const runAttempt = async (keyword) => {
+    // 缓存键必须包含 limitPerSource 与 sort：
+    // - 翻页时每源抓取条数会变，缓存内容不能混用；
+    // - 有些站点（如 BitSearch）的排序参数会改变**返回的结果集合**而不只是顺序，
+    //   漏掉 sort 会让不同排序的请求互相复用对方那批候选。
+    const cacheKey = `${keyword}|${sourceIds}|${limitPerSource}|${sort}`;
 
-  let collected = null;
-  let statuses = null;
-  let fromCache = false;
+    let collected = null;
+    let statuses = null;
+    let fromCache = false;
 
-  if (cacheTtlMs > 0 && !bypassCache) {
-    const hit = readSearchCache(cacheKey, cacheTtlMs);
-    if (hit) {
-      collected = hit.results;
-      statuses = hit.statuses.map((status) => ({ ...status, cached: true }));
-      fromCache = true;
-      logger(`命中搜索缓存：${query}（${hit.results.length} 条，${Math.round((Date.now() - hit.at) / 1000)} 秒前）`);
+    if (cacheTtlMs > 0 && !bypassCache) {
+      const hit = readSearchCache(cacheKey, cacheTtlMs);
+      if (hit) {
+        collected = hit.results;
+        statuses = hit.statuses.map((status) => ({ ...status, cached: true }));
+        fromCache = true;
+        logger(`命中搜索缓存：${keyword}（${hit.results.length} 条，${Math.round((Date.now() - hit.at) / 1000)} 秒前）`);
+      }
+    }
+
+    if (!collected) {
+      const fetched = await fetchAllSources({
+        sources,
+        query: keyword,
+        sort,
+        limitPerSource,
+        timeoutMs,
+        http: options.http,
+        cache: options.cache,
+        logger,
+        signal: options.signal,
+      });
+      collected = fetched.collected;
+      statuses = fetched.statuses;
+      if (cacheTtlMs > 0) writeSearchCache(cacheKey, collected, statuses);
+    }
+
+    const merged = mergeResults(collected);
+    const filtered = filterResults(merged, filters);
+
+    return { keyword, statuses, fromCache, filtered, total: filtered.length, totalBeforeFilter: merged.length };
+  };
+
+  let adopted = await runAttempt(query);
+  let relaxedFrom = null;
+  let relaxedTo = null;
+
+  // 自动放宽：只在"结果明显不够"时才试别的写法。
+  // 结果充足时一个多余的请求都不会发（阈值判断在扇出之前）。
+  if (adopted.total < RELAX_THRESHOLD) {
+    let attempts = 0;
+    for (const variant of relaxQueryVariants(query)) {
+      if (attempts >= MAX_RELAX_ATTEMPTS) break;
+      attempts += 1;
+
+      const attempt = await runAttempt(variant);
+      logger(`放宽重试 ${attempts}/${MAX_RELAX_ATTEMPTS}：「${variant}」→ ${attempt.total} 条`);
+
+      // 只有真的变多了才采用：放宽是为了"找到更多"，不是为了"换一个关键词"。
+      // 采用后 sources 报的仍是这一轮各源的真实状态，不因为重试而改写含义。
+      if (attempt.total > adopted.total) {
+        adopted = attempt;
+        relaxedFrom = query;
+        relaxedTo = variant;
+      }
+
+      if (adopted.total >= RELAX_THRESHOLD) break;
     }
   }
 
-  if (!collected) {
-    const fetched = await fetchAllSources({
-      sources,
-      query,
-      sort,
-      limitPerSource,
-      timeoutMs,
-      http: options.http,
-      cache: options.cache,
-      logger,
-      signal: options.signal,
-    });
-    collected = fetched.collected;
-    statuses = fetched.statuses;
-    if (cacheTtlMs > 0) writeSearchCache(cacheKey, collected, statuses);
-  }
-
+  const statuses = adopted.statuses;
   for (const id of unknown) {
     statuses.push({ id, name: id, ok: false, count: 0, tookMs: 0, error: '未知数据源', cached: false });
   }
 
-  const merged = mergeResults(collected);
-  const totalBeforeFilter = merged.length;
-  const filtered = filterResults(merged, filters);
-
-  const tokens = tokenize(query);
+  // 相关度按"实际使用的关键词"算：放宽后如果还拿原查询去打分，
+  // 所有结果都会因为命中不了 `ubuntu2404` 而被判成 0 相关，排序等于失效。
+  const tokens = tokenize(adopted.keyword);
   const now = Date.now();
-  for (const result of filtered) {
+  for (const result of adopted.filtered) {
     result.sourceName = getSource(result.source)?.name ?? result.source;
     result.score = scoreResult(result, tokens, now);
   }
 
-  const sorted = sortResults(filtered, sort, order);
+  const sorted = sortResults(adopted.filtered, sort, order);
   const total = sorted.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = (page - 1) * pageSize;
 
   return {
     query,
+    // 没放宽时两个字段都是 null（不省略，保持响应形状稳定）
+    relaxedFrom,
+    relaxedTo,
     sort,
     order,
     tookMs: Date.now() - startedAt,
     page,
     pageSize,
     total,
-    totalBeforeFilter,
+    totalBeforeFilter: adopted.totalBeforeFilter,
     totalPages,
     filters,
-    cached: fromCache,
+    cached: adopted.fromCache,
     results: sorted.slice(start, start + pageSize),
     sources: statuses.sort((a, b) => a.id.localeCompare(b.id)),
   };

@@ -919,6 +919,8 @@ function renderResults(data, query) {
     totalBeforeFilter: asNumber(data.totalBeforeFilter),
     cached: asBool(data.cached),
     filters: data.filters,
+    // 后端自动放宽过查询时说明白，否则用户会以为「ubuntu2404」真能搜到这些结果
+    relaxedTo: asString(data.relaxedTo),
   });
   renderSourceStatus(Array.isArray(data.sources) ? data.sources : []);
   updateSortIndicators();
@@ -1342,12 +1344,15 @@ function buildResultRow(item, keywords) {
   }
 }
 
-/** 结果摘要：总数 / 耗时 / 已过滤 N 条 / 缓存标记。 */
+/** 结果摘要：总数 / 耗时 / 已过滤 N 条 / 缓存标记 / 自动放宽说明。 */
 function renderSummary(meta) {
   if (dom.resultSummary) {
     const parts = ['共 ' + formatInt(meta.total === null ? 0 : meta.total) + ' 条结果'];
     if (meta.tookMs !== null) parts.push('耗时 ' + Math.round(meta.tookMs) + ' ms');
-    dom.resultSummary.textContent = parts.join('，');
+    // 只用 textContent 拼接：relaxedTo 是服务端回显的字符串，绝不当 HTML 用
+    let text = parts.join('，');
+    if (meta.relaxedTo) text += '（已自动放宽为「' + meta.relaxedTo + '」）';
+    dom.resultSummary.textContent = text;
   }
 
   const after = meta.total === null ? 0 : meta.total;

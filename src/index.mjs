@@ -27,8 +27,10 @@ export {
   clearSearchCache,
   searchCacheSize,
   describeError,
+  relaxQueryVariants,
   SORT_MODES,
   SORT_ORDERS,
+  RELAX_THRESHOLD,
 } from './aggregate.mjs';
 export { createHttpClient, detectSystemProxy, normalizeProxy, HttpError } from './http.mjs';
 export { DiskCache, defaultCacheDir } from './cache.mjs';
