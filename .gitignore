@@ -26,3 +26,7 @@ Thumbs.db
 
 # 多角色交付流程的任务目录（过程产物，不进仓库）
 .dsh-team/
+
+# 本地起测试服务留下的临时文件
+server-*.txt
+server-*.pid
