@@ -149,9 +149,9 @@ node bin/magnet-search.mjs ubuntu --safe --sort leechers --order asc
 ### Automatic query relaxation when a search comes up short
 
 Upstream sites require **separated** keywords and are spelling-sensitive: `ubuntu2404` (no separator)
-really returns 0 results, while `ubuntu 24.04` returns dozens. So when the filtered result count is
-below 5, the tool retries a few other spellings, **at most 3 extra rounds**, and stops as soon as it
-has 5:
+really returns 0 results, while `ubuntu 2404` / `ubuntu 24.04` do return hits. So when the filtered
+result count is below 5, the tool retries a few other spellings, **at most 3 extra rounds**, and stops
+as soon as it has 5:
 
 ```bash
 node bin/magnet-search.mjs ubuntu2404

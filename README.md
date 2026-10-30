@@ -165,8 +165,8 @@ node bin/magnet-search.mjs ubuntu --safe --sort leechers --order asc
 ### 查不到时会自动放宽关键词
 
 上游站点要求关键词之间**有分隔**，而且对拼写敏感：`ubuntu2404` 连写实测直接 0 条，
-`ubuntu 24.04` 有几十条。所以过滤后结果少于 5 条时，工具会自动换几个写法再试，
-**最多重试 3 次**，凑够 5 条就停：
+写成 `ubuntu 2404` / `ubuntu 24.04` 才搜得到。所以过滤后结果少于 5 条时，
+工具会自动换几个写法再试，**最多重试 3 次**，凑够 5 条就停：
 
 ```bash
 node bin/magnet-search.mjs ubuntu2404
